@@ -41,11 +41,11 @@ KDIR := /home/yaya/D/Workspace/CyberQuantum/JinHaoYue/amls905x3/SDK/20191101-0tt
 endif
 
 ifeq ($(CONFIG_PLATFORM_UBUNTU), y)
-KDIR  := /lib/modules/$(shell uname -r)/build
-PWD   := $(shell pwd)
-KVER := $(shell uname -r)
-MODDESTDIR := /lib/modules/$(KVER)/kernel/drivers/net/wireless/aic8800
-ARCH ?= $(shell uname -m) 
+KDIR  ?= /lib/modules/$(shell uname -r)/build
+PWD   ?= $(shell pwd)
+KVER ?= $(shell uname -r)
+MODDESTDIR ?= /lib/modules/$(KVER)/kernel/drivers/net/wireless/aic8800
+ARCH ?= $(shell uname -m)
 CROSS_COMPILE ?=
 ccflags-y += -Wno-implicit-fallthrough -Wno-unused-function -Wno-unused-variable
 endif

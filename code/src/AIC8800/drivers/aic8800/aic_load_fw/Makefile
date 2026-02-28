@@ -78,12 +78,12 @@ endif
 
 ifeq ($(CONFIG_PLATFORM_UBUNTU), y)
 ccflags-$(CONFIG_PLATFORM_UBUNTU) += -DCONFIG_PLATFORM_UBUNTU
-KDIR  := /lib/modules/$(shell uname -r)/build
-PWD   := $(shell pwd)
-KVER := $(shell uname -r)
-MODDESTDIR := /lib/modules/$(KVER)/kernel/drivers/net/wireless/aic8800
-ARCH := $(shell uname -m) 
-CROSS_COMPILE :=
+KDIR  ?= /lib/modules/$(shell uname -r)/build
+PWD   ?= $(shell pwd)
+KVER ?= $(shell uname -r)
+MODDESTDIR ?= /lib/modules/$(KVER)/kernel/drivers/net/wireless/aic8800
+ARCH ?= $(shell uname -m)
+CROSS_COMPILE ?=
 endif
 
 
