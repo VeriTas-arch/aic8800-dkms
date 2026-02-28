@@ -57,6 +57,13 @@ chmod +x scripts/dkms-refresh-all-kernels.sh
 ./scripts/dkms-refresh-all-kernels.sh
 ```
 
+可选：清理旧版本驱动
+
+```shell
+chmod +x scripts/dkms-clean-old-versions.sh
+./scripts/dkms-clean-old-versions.sh
+```
+
 ### Step 3: 验证
 
 ```shell
