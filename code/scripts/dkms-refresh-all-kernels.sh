@@ -5,6 +5,10 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODULE_NAME="aic8800fdrv"
 VERSION_FILE="$REPO_ROOT/VERSION"
 SOURCE_DIR="$REPO_ROOT/src/AIC8800/drivers/aic8800"
+FW_SRC_DIR="$REPO_ROOT/src/AIC8800/fw/aic8800DC"
+FW_DST_DIR="/lib/firmware/aic8800DC"
+RULES_SRC="$REPO_ROOT/src/AIC8800/aic.rules"
+RULES_DST="/etc/udev/rules.d/aic.rules"
 
 if [[ ! -f "$VERSION_FILE" ]]; then
     echo "[ERROR] VERSION file not found: $VERSION_FILE" >&2
@@ -81,6 +85,27 @@ done
 
 echo "[INFO] Final DKMS status"
 dkms status | grep "$MODULE_NAME" || true
+
+echo "[INFO] Install firmware files"
+if [[ -d "$FW_SRC_DIR" ]]; then
+    sudo rm -rf "$FW_DST_DIR"
+    sudo mkdir -p "$FW_DST_DIR"
+    sudo cp -a "$FW_SRC_DIR/." "$FW_DST_DIR/"
+else
+    echo "[WARN] firmware source not found: $FW_SRC_DIR"
+fi
+
+echo "[INFO] Install udev rule for AIC MSC eject"
+if [[ -f "$RULES_SRC" ]]; then
+    sudo install -m 0644 "$RULES_SRC" "$RULES_DST"
+    sudo udevadm control --reload
+    sudo udevadm trigger
+else
+    echo "[WARN] udev rule source not found: $RULES_SRC"
+fi
+
+echo "[INFO] Remove old usb-storage quirk config if exists"
+sudo rm -f /etc/modprobe.d/aic8800-usb-storage-quirks.conf
 
 if [[ $FAILED -ne 0 ]]; then
     echo "[ERROR] One or more kernels failed. Please check logs above." >&2

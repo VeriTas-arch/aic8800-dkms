@@ -22,7 +22,7 @@
 /* USB Device ID */
 #define USB_VENDOR_ID_AIC               0xA69C
 #define USB_DEVICE_ID_AIC               0x8800
-#define USB_DEVICE_ID_AIC_8801		0x8801
+#define USB_DEVICE_ID_AIC_8801		    0x8801
 
 #define AICWF_USB_RX_URBS               (20)
 #define AICWF_USB_TX_URBS               (100)

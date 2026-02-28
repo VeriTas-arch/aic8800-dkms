@@ -44,6 +44,10 @@ chmod +x scripts/dkms-local-install.sh
 ./scripts/dkms-local-install.sh
 ```
 
+说明：脚本会自动安装 `src/AIC8800/aic.rules` 到 `/etc/udev/rules.d/aic.rules`，
+通过 `eject` 触发 `a69c:5721 (Aic MSC)` 从存储态切换到无线驱动态。
+同时会自动同步固件目录 `src/AIC8800/fw/aic8800DC` 到 `/lib/firmware/aic8800DC`。
+
 可选：指定目标内核版本
 
 ```shell
@@ -72,6 +76,18 @@ sudo modprobe aic_load_fw
 sudo modprobe aic8800_fdrv
 lsmod | grep -E "aic_load_fw|aic8800_fdrv"
 ```
+
+如果当前这次开机仍停留在 `Aic MSC`，先执行一次安全热触发（不强制绑驱动）：
+
+```shell
+sudo udevadm control --reload
+sudo udevadm trigger
+ls -l /dev/aicudisk
+sudo eject /dev/aicudisk
+sudo dmesg -w | grep -Ei "aic|usb|firmware|rwnx"
+```
+
+注意：不建议再使用 `unbind/bind` 强制切换接口，容易导致 USB 栈异常或系统卡死。
 
 ## 版本维护
 
