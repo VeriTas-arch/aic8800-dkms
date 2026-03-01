@@ -228,7 +228,7 @@ static inline int rwnx_rx_remain_on_channel_exp_ind(struct rwnx_hw *rwnx_hw,
 
     rwnx_vif = container_of(roc_elem->wdev, struct rwnx_vif, wdev);
 
-	
+
 #ifdef CREATE_TRACE_POINTS
     /* For debug purpose (use ftrace kernel option) */
     trace_roc_exp(rwnx_vif->vif_index);
@@ -521,7 +521,7 @@ static inline int rwnx_rx_ps_change_ind(struct rwnx_hw *rwnx_hw,
 
 #if 1//2022-01-15 add for rwnx_hw->vif_table[sta->vif_idx] if null when rwnx_close
 	if (!rwnx_hw->vif_table[sta->vif_idx]){
-        wiphy_err(rwnx_hw->wiphy, "rwnx_hw->vif_table[sta->vif_idx] is null\n");	
+        wiphy_err(rwnx_hw->wiphy, "rwnx_hw->vif_table[sta->vif_idx] is null\n");
 		return 0;
 	}
 #endif
@@ -544,7 +544,7 @@ static inline int rwnx_rx_ps_change_ind(struct rwnx_hw *rwnx_hw,
         netdev_err(rwnx_hw->vif_table[sta->vif_idx]->ndev,
                    "Ignore PS mode change on invalid sta\n");
     }
-	
+
 
     return 0;
 }
@@ -614,7 +614,7 @@ static inline int rwnx_rx_scanu_start_cfm(struct rwnx_hw *rwnx_hw,
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
-    if (rwnx_hw->scan_request 
+    if (rwnx_hw->scan_request
 #ifdef CONFIG_USE_WIRELESS_EXT
 		&& !rwnx_hw->wext_scan) {
 #else
@@ -627,7 +627,7 @@ static inline int rwnx_rx_scanu_start_cfm(struct rwnx_hw *rwnx_hw,
 #else
         cfg80211_scan_done(rwnx_hw->scan_request, false);
 #endif
-    } 
+    }
 
 
 #ifdef CONFIG_USE_WIRELESS_EXT
@@ -658,19 +658,19 @@ static inline int rwnx_rx_scanu_result_ind(struct rwnx_hw *rwnx_hw,
     struct ieee80211_channel *chan;
     struct scanu_result_ind *ind = (struct scanu_result_ind *)msg->param;
     struct ieee80211_mgmt *mgmt = (struct ieee80211_mgmt *)ind->payload;
-	
+
 	const u8 *ie = mgmt->u.beacon.variable;
 	char *ssid = NULL;
 	int ssid_len = 0;
 	int freq = 0;
-	
+
 #ifdef CONFIG_USE_WIRELESS_EXT
 	struct scanu_result_wext *scan_re_wext;
 #endif
 
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
-	
+
     chan = ieee80211_get_channel(rwnx_hw->wiphy, ind->center_freq);
 
     if (chan != NULL) {
@@ -695,27 +695,27 @@ static inline int rwnx_rx_scanu_result_ind(struct rwnx_hw *rwnx_hw,
 		memset(ssid, 0, ssid_len + 1);
 		memcpy(ssid, &ie[2], ssid_len);
 		freq = ind->center_freq;
-		AICWFDBG(LOGDEBUG, "%s %02x:%02x:%02x:%02x:%02x:%02x ssid:%s freq:%d timestamp:%ld, %d\r\n", __func__, 
+		AICWFDBG(LOGDEBUG, "%s %02x:%02x:%02x:%02x:%02x:%02x ssid:%s freq:%d timestamp:%ld, %d\r\n", __func__,
 			bss->bssid[0],bss->bssid[1],bss->bssid[2],
 			bss->bssid[3],bss->bssid[4],bss->bssid[5],
 			ssid, freq, (long)mgmt->u.probe_resp.timestamp, ind->rssi);
 		kfree(ssid);
 		ssid = NULL;
 		//print scan result info end
-		
+
 #ifdef CONFIG_USE_WIRELESS_EXT
 		if(rwnx_hw->wext_scan){
-			
+
 			scan_re_wext = (struct scanu_result_wext *)vmalloc(sizeof(struct scanu_result_wext));
 			scan_re_wext->ind = (struct scanu_result_ind *)vmalloc(sizeof(struct scanu_result_ind));
 			scan_re_wext->payload = (u32_l *)vmalloc(sizeof(u32_l) * ind->length);
 
 			memset(scan_re_wext->ind, 0, sizeof(struct scanu_result_ind));
 			memset(scan_re_wext->payload, 0, ind->length);
-			
+
 			memcpy(scan_re_wext->ind, ind, sizeof(struct scanu_result_ind));
 			memcpy(scan_re_wext->payload, ind->payload, ind->length);
-	
+
 			scan_re_wext->bss = bss;
 
 			INIT_LIST_HEAD(&scan_re_wext->scanu_re_list);
@@ -818,6 +818,8 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
     const u8 *extcap_ie;
     const struct ieee_types_extcap *extcap;
     struct ieee80211_channel *chan;
+    unsigned int roamed_raw = 0;
+    bool roamed = false;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
@@ -835,6 +837,12 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
 
 	if (rwnx_vif->sta.external_auth)
 		rwnx_vif->sta.external_auth = false;
+
+    memcpy(&roamed_raw, &ind->roamed, sizeof(ind->roamed));
+    roamed = !!roamed_raw;
+    if (roamed_raw > 1)
+        AICWFDBG(LOGERROR, "%s invalid roamed value:%u, normalized to:%d\r\n",
+                 __func__, roamed_raw, roamed);
 
 
     // Fill-in the AP information
@@ -947,14 +955,14 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
 	}
 
 
-    AICWFDBG(LOGINFO, "%s ind->roamed:%d ind->status_code:%d rwnx_vif->drv_conn_state:%d\r\n", 
-        __func__, 
-        ind->roamed, 
+    AICWFDBG(LOGINFO, "%s ind->roamed:%d ind->status_code:%d rwnx_vif->drv_conn_state:%d\r\n",
+        __func__,
+        roamed,
         ind->status_code,
         (int)atomic_read(&rwnx_vif->drv_conn_state));
 
 
-    if (!ind->roamed) {//not roaming
+    if (!roamed) {//not roaming
         cfg80211_connect_result(dev, (const u8 *)ind->bssid.array, req_ie,
                                 ind->assoc_req_ie_len, rsp_ie,
                                 ind->assoc_rsp_ie_len, ind->status_code,
@@ -973,7 +981,7 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
 			info.channel = rwnx_hw->chanctx_table[rwnx_vif->ch_index].chan_def.chan;
 #else
 			info.links[0].channel = rwnx_hw->chanctx_table[rwnx_vif->ch_index].chan_def.chan;
-#endif//LINUX_VERSION_CODE < KERNEL_VERSION(6, 0, 0)    
+#endif//LINUX_VERSION_CODE < KERNEL_VERSION(6, 0, 0)
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 0, 0)
         info.bssid = (const u8 *)ind->bssid.array;
@@ -1503,12 +1511,12 @@ static msg_cb_fct *msg_hdlrs[] = {
  */
 void rwnx_rx_handle_msg(struct rwnx_hw *rwnx_hw, struct ipc_e2a_msg *msg)
 {
-	//printk("%s(%d) MSG_T(msg->id):%d MSG_I(msg->id):%d cmd:%s\r\n", __func__, 
+	//printk("%s(%d) MSG_T(msg->id):%d MSG_I(msg->id):%d cmd:%s\r\n", __func__,
 	//	msg->id,
-	//	MSG_T(msg->id), 
+	//	MSG_T(msg->id),
 	//	MSG_I(msg->id),
 	//	rwnx_id2str[MSG_T(msg->id)][MSG_I(msg->id)]);
-	
+
     rwnx_hw->cmd_mgr->msgind(rwnx_hw->cmd_mgr, msg,
                             msg_hdlrs[MSG_T(msg->id)][MSG_I(msg->id)]);
 }

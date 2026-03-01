@@ -320,17 +320,21 @@ ccflags-y += -DCONFIG_PLATFORM_ROCKCHIP
 endif
 
 ifeq ($(CONFIG_PLATFORM_ALLWINNER), y)
-KDIR  ?= /home/yaya/E/Allwinner/R818/R818/AndroidQ/lichee/kernel/linux-4.9
+# Override when building for Allwinner:
+#   make KDIR=/path/to/kernel ARCH=arm64 CROSS_COMPILE=/path/to/toolchain-prefix-
+KDIR  ?= /path/to/kernel
 ARCH ?= arm64
-CROSS_COMPILE ?= /home/yaya/E/Allwinner/R818/R818/AndroidQ/lichee/out/gcc-linaro-5.3.1-2016.05-x86_64_aarch64-linux-gnu/bin/aarch64-linux-gnu-
+CROSS_COMPILE ?= /path/to/toolchain-prefix-
 ccflags-y += -DANDROID_PLATFORM
 endif
 
 ifeq ($(CONFIG_PLATFORM_AMLOGIC), y)
 ccflags-y += -DANDROID_PLATFORM
 ARCH ?= arm
-CROSS_COMPILE ?= /home/yaya/D/Workspace/CyberQuantum/JinHaoYue/amls905x3/SDK/20191101-0tt-asop/android9.0/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/bin/arm-linux-androidkernel-
-KDIR ?= /home/yaya/D/Workspace/CyberQuantum/JinHaoYue/amls905x3/SDK/20191101-0tt-asop/android9.0/out/target/product/u202/obj/KERNEL_OBJ/
+# Override when building for Amlogic:
+#   make KDIR=/path/to/kernel ARCH=arm CROSS_COMPILE=/path/to/toolchain-prefix-
+CROSS_COMPILE ?= /path/to/toolchain-prefix-
+KDIR ?= /path/to/kernel
 
 endif
 

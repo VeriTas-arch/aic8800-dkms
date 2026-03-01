@@ -2836,23 +2836,18 @@ static struct rwnx_vif *rwnx_interface_add(struct rwnx_hw *rwnx_hw,
         break;
     }
 
-    if (type == NL80211_IFTYPE_AP_VLAN) {
-        ether_addr_copy(ndev->dev_addr, params->macaddr);
-        memcpy(vif->wdev.address, params->macaddr, ETH_ALEN);
-    }
-    else {
-#if LINUX_VERSION_CODE > KERNEL_VERSION(5, 17, 0)
-        unsigned char mac_addr[6];
-        
-        memcpy(mac_addr, rwnx_hw->wiphy->perm_addr, ETH_ALEN);
-        mac_addr[5] ^= vif_idx;
-        ether_addr_copy(ndev->dev_addr, mac_addr);
-        memcpy(vif->wdev.address, ndev->dev_addr, ETH_ALEN);
-#else
-        memcpy(ndev->dev_addr, rwnx_hw->wiphy->perm_addr, ETH_ALEN);
-        ndev->dev_addr[5] ^= vif_idx;
-        memcpy(vif->wdev.address, ndev->dev_addr, ETH_ALEN);
-#endif
+    {
+        unsigned char mac_addr[ETH_ALEN];
+
+        if (type == NL80211_IFTYPE_AP_VLAN) {
+            ether_addr_copy(mac_addr, params->macaddr);
+        } else {
+            ether_addr_copy(mac_addr, rwnx_hw->wiphy->perm_addr);
+            mac_addr[5] ^= vif_idx;
+        }
+
+        eth_hw_addr_set(ndev, mac_addr);
+        ether_addr_copy(vif->wdev.address, mac_addr);
     }
 
 	AICWFDBG(LOGINFO, "interface add:%x %x %x %x %x %x\n", vif->wdev.address[0], vif->wdev.address[1],
@@ -8789,7 +8784,7 @@ if((g_rwnx_plat->usbdev->chipid == PRODUCT_ID_AIC8801) ||
     }
 
     rwnx_hwq_init(rwnx_hw);
-    
+
 #ifdef CONFIG_PREALLOC_TXQ
     rwnx_hw->txq = (struct rwnx_txq*)aicwf_prealloc_txq_alloc(sizeof(struct rwnx_txq)*NX_NB_TXQ);
 #endif

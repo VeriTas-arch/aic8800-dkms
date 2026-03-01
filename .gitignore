@@ -19,6 +19,18 @@
 # .nfs files are created when an open file is removed but is still being accessed
 .nfs*
 
+# Kernel module build artifacts
+**/*.o
+**/*.ko
+**/*.mod
+**/*.mod.c
+**/*.mod.o
+**/*.symvers
+**/Module.symvers
+**/modules.order
+**/.*.cmd
+**/.tmp_versions/
+
 ### macOS ###
 # General
 .DS_Store
