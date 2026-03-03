@@ -812,37 +812,77 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
                                          struct ipc_e2a_msg *msg)
 {
     struct sm_connect_ind *ind = (struct sm_connect_ind *)msg->param;
-    struct rwnx_vif *rwnx_vif = rwnx_hw->vif_table[ind->vif_idx];
+    struct rwnx_vif *rwnx_vif;
     struct net_device *dev = NULL;
     const u8 *req_ie, *rsp_ie;
     const u8 *extcap_ie;
     const struct ieee_types_extcap *extcap;
     struct ieee80211_channel *chan;
+    u16 assoc_req_ie_len;
+    u16 assoc_rsp_ie_len;
+    bool had_sta_ap;
+    int prev_drv_conn_state;
     unsigned int roamed_raw = 0;
     bool roamed = false;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
+    if (ind->vif_idx >= (NX_VIRT_DEV_MAX + NX_REMOTE_STA_MAX)) {
+        AICWFDBG(LOGERROR, "%s invalid vif idx:%u\r\n", __func__, ind->vif_idx);
+        return 0;
+    }
+
+	rwnx_vif = rwnx_hw->vif_table[ind->vif_idx];
 	if(!rwnx_vif){
 		AICWFDBG(LOGERROR, "%s rwnx_vif is null \r\n", __func__);
 		return 0;
 	}
 	dev = rwnx_vif->ndev;
+    had_sta_ap = (rwnx_vif->sta.ap != NULL);
+    prev_drv_conn_state = atomic_read(&rwnx_vif->drv_conn_state);
+
+    if (ind->ap_idx >= (NX_REMOTE_STA_MAX + NX_VIRT_DEV_MAX)) {
+        AICWFDBG(LOGERROR, "%s invalid ap idx:%u\r\n", __func__, ind->ap_idx);
+        return 0;
+    }
+
+    assoc_req_ie_len = ind->assoc_req_ie_len;
+    assoc_rsp_ie_len = ind->assoc_rsp_ie_len;
+    if ((u32)assoc_req_ie_len + (u32)assoc_rsp_ie_len > sizeof(ind->assoc_ie_buf)) {
+        AICWFDBG(LOGERROR,
+                 "%s invalid assoc ie lens req:%u rsp:%u max:%zu, drop ies\r\n",
+                 __func__, assoc_req_ie_len, assoc_rsp_ie_len,
+                 sizeof(ind->assoc_ie_buf));
+        assoc_req_ie_len = 0;
+        assoc_rsp_ie_len = 0;
+    }
 
 
     /* Retrieve IE addresses and lengths */
     req_ie = (const u8 *)ind->assoc_ie_buf;
-    rsp_ie = req_ie + ind->assoc_req_ie_len;
+    rsp_ie = req_ie + assoc_req_ie_len;
 
 
 	if (rwnx_vif->sta.external_auth)
 		rwnx_vif->sta.external_auth = false;
 
     memcpy(&roamed_raw, &ind->roamed, sizeof(ind->roamed));
-    roamed = !!roamed_raw;
-    if (roamed_raw > 1)
-        AICWFDBG(LOGERROR, "%s invalid roamed value:%u, normalized to:%d\r\n",
-                 __func__, roamed_raw, roamed);
+    if (roamed_raw == 1) {
+        roamed = true;
+    } else if (roamed_raw == 0) {
+        roamed = false;
+    } else {
+        roamed = false;
+        AICWFDBG(LOGERROR, "%s invalid roamed value:%u, force non-roaming path\r\n",
+                 __func__, roamed_raw);
+    }
+
+    if (roamed && (!had_sta_ap || (prev_drv_conn_state != RWNX_DRV_STATUS_CONNECTED))) {
+        roamed = false;
+        AICWFDBG(LOGERROR,
+                 "%s suppress roaming report: no previous connected STA (had_ap=%d prev_state=%d)\r\n",
+                 __func__, had_sta_ap, prev_drv_conn_state);
+    }
 
 
     // Fill-in the AP information
@@ -869,12 +909,33 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
         sta->center_freq2 = ind->center_freq2;
         rwnx_vif->sta.ap = sta;
 
+        if (ind->ch_idx >= NX_CHAN_CTXT_CNT) {
+            AICWFDBG(LOGERROR, "%s invalid ch_idx:%u\r\n", __func__, ind->ch_idx);
+            atomic_set(&rwnx_vif->drv_conn_state, (int)RWNX_DRV_STATUS_DISCONNECTED);
+            cfg80211_connect_result(dev, (const u8 *)ind->bssid.array,
+                                    NULL, 0, NULL, 0,
+                                    WLAN_STATUS_UNSPECIFIED_FAILURE,
+                                    GFP_ATOMIC);
+            return 0;
+        }
+
         chan = ieee80211_get_channel(rwnx_hw->wiphy, ind->center_freq);
+        if (!chan) {
+            AICWFDBG(LOGERROR, "%s invalid center_freq:%u\r\n", __func__, ind->center_freq);
+            atomic_set(&rwnx_vif->drv_conn_state, (int)RWNX_DRV_STATUS_DISCONNECTED);
+            cfg80211_connect_result(dev, (const u8 *)ind->bssid.array,
+                                    NULL, 0, NULL, 0,
+                                    WLAN_STATUS_UNSPECIFIED_FAILURE,
+                                    GFP_ATOMIC);
+            return 0;
+        }
         cfg80211_chandef_create(&chandef, chan, NL80211_CHAN_NO_HT);
         if (!rwnx_hw->mod_params->ht_on)
             chandef.width = NL80211_CHAN_WIDTH_20_NOHT;
-        else
+        else if (ind->width < PHY_CHNL_BW_OTHER)
             chandef.width = chnl2bw[ind->width];
+        else
+            chandef.width = NL80211_CHAN_WIDTH_20;
         chandef.center_freq1 = ind->center_freq1;
         chandef.center_freq2 = ind->center_freq2;
         rwnx_chanctx_link(rwnx_vif, ind->ch_idx, &chandef);
@@ -893,7 +954,7 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
         rwnx_mu_group_sta_init(sta, NULL);
         /* Look for TDLS Channel Switch Prohibited flag in the Extended Capability
          * Information Element*/
-        extcap_ie = cfg80211_find_ie(WLAN_EID_EXT_CAPABILITY, rsp_ie, ind->assoc_rsp_ie_len);
+        extcap_ie = cfg80211_find_ie(WLAN_EID_EXT_CAPABILITY, rsp_ie, assoc_rsp_ie_len);
         if (extcap_ie && extcap_ie[1] >= 5) {
             extcap = (void *)(extcap_ie);
             rwnx_vif->tdls_chsw_prohibited = extcap->ext_capab[4] & WLAN_EXT_CAPA5_TDLS_CH_SW_PROHIBITED;
@@ -917,7 +978,7 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
             do {
                 /* Look for VHT Capability Information Element */
                 vht_capa_ie = cfg80211_find_ie(WLAN_EID_VHT_CAPABILITY, rsp_ie,
-                                               ind->assoc_rsp_ie_len);
+                                               assoc_rsp_ie_len);
 
                 /* Stop here if peer device does not support VHT */
                 if (!vht_capa_ie) {
@@ -964,8 +1025,8 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
 
     if (!roamed) {//not roaming
         cfg80211_connect_result(dev, (const u8 *)ind->bssid.array, req_ie,
-                                ind->assoc_req_ie_len, rsp_ie,
-                                ind->assoc_rsp_ie_len, ind->status_code,
+                                assoc_req_ie_len, rsp_ie,
+                                assoc_rsp_ie_len, ind->status_code,
                                 GFP_ATOMIC);
     }
     else {//roaming
@@ -989,9 +1050,9 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
         info.links[0].bssid = (const u8 *)ind->bssid.array;;
 #endif//LINUX_VERSION_CODE < KERNEL_VERSION(6, 0, 0)
         info.req_ie = req_ie;
-        info.req_ie_len = ind->assoc_req_ie_len;
+        info.req_ie_len = assoc_req_ie_len;
         info.resp_ie = rsp_ie;
-        info.resp_ie_len = ind->assoc_rsp_ie_len;
+        info.resp_ie_len = assoc_rsp_ie_len;
         AICWFDBG(LOGINFO, "%s roaming success to notify roam \r\n", __func__);
         cfg80211_roamed(dev, &info, GFP_ATOMIC);
 #else
@@ -1003,9 +1064,9 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
 #endif
             , (const u8 *)ind->bssid.array
             , req_ie
-            , ind->assoc_req_ie_len
+            , assoc_req_ie_len
             , rsp_ie
-            , ind->assoc_rsp_ie_len
+            , assoc_rsp_ie_len
             , GFP_ATOMIC);
 #endif /*LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0)*/
             }
@@ -1127,13 +1188,13 @@ static inline int rwnx_rx_sm_disconnect_ind(struct rwnx_hw *rwnx_hw,
         BUG();//should be not here: del_sta function
 #endif
 
-    rwnx_txq_sta_deinit(rwnx_hw, rwnx_vif->sta.ap);
+    if (rwnx_vif->sta.ap) {
+        rwnx_txq_sta_deinit(rwnx_hw, rwnx_vif->sta.ap);
+        rwnx_dbgfs_unregister_rc_stat(rwnx_hw, rwnx_vif->sta.ap);
+        rwnx_vif->sta.ap->valid = false;
+        rwnx_vif->sta.ap = NULL;
+    }
     rwnx_txq_tdls_vif_deinit(rwnx_vif);
-    #if 0
-    rwnx_dbgfs_unregister_rc_stat(rwnx_hw, rwnx_vif->sta.ap);
-    #endif
-    rwnx_vif->sta.ap->valid = false;
-    rwnx_vif->sta.ap = NULL;
     rwnx_external_auth_disable(rwnx_vif);
     rwnx_chanctx_unlink(rwnx_vif);
 

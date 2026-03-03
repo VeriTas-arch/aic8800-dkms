@@ -1,5 +1,5 @@
 Package:aic8800fdrvpackage
-Version:1.0.7
+Version:1.0.8
 Architecture:amd64
 Maintainer:mirrortree
 Description:aic8800 wifi driver deb package

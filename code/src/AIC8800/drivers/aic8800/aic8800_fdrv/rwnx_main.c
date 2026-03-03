@@ -3818,11 +3818,14 @@ static int rwnx_cfg80211_disconnect(struct wiphy *wiphy, struct net_device *dev,
 		#endif
 		key_flag = true;
 		return(rwnx_send_sm_disconnect_req(rwnx_hw, rwnx_vif, reason_code));
-	}else{
+    }else if (atomic_read(&rwnx_vif->drv_conn_state) == RWNX_DRV_STATUS_CONNECTING) {
 		cfg80211_connect_result(dev,  NULL, NULL, 0, NULL, 0,
 			reason_code?reason_code:WLAN_STATUS_UNSPECIFIED_FAILURE, GFP_ATOMIC);
 		atomic_set(&rwnx_vif->drv_conn_state, RWNX_DRV_STATUS_DISCONNECTED);
 		return 0;
+    }else{
+        atomic_set(&rwnx_vif->drv_conn_state, RWNX_DRV_STATUS_DISCONNECTED);
+        return 0;
 	}
 
 }
