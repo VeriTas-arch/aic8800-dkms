@@ -1,53 +1,69 @@
-# AIC8800 驱动
+# AIC8800 DKMS Driver
 
-Mercury UX3H(免驱版)(一点也不免驱) AX300 Ubuntu24.04 Linux kernel 6.8.0 amd64 驱动，适用于 dkms 自动更新，基于
+本仓库提供 AIC8800 驱动的 DKMS 集成版本，目标是在 Ubuntu 平台上实现内核升级后的自动重建与自动安装。
+
+驱动来源：
 
 - [水星官方驱动](https://service.mercurycom.com.cn/download-2596.html)
 - [原修改版驱动](https://github.com/bk1d/aic8800fdrvpackage)
 
-## 安装
+## 目录说明
 
-适用于 dkms 自动更新的纯驱动包安装方式。若只需要 deb 包安装方式，参见[原修改版驱动](https://github.com/bk1d/aic8800fdrvpackage)。
+- `code/scripts`: DKMS 安装、刷新、清理与版本同步脚本
+- `code/src/AIC8800`: 驱动源码、固件与 udev 规则
+- `code/VERSION`: 仓库内统一版本号来源
 
-### Step 1: 安装依赖
+## 适用范围
+
+- 已验证环境：Ubuntu 24.04、Linux 6.8.x、amd64
+- 主要场景：USB 设备上电后先枚举为存储态（Aic MSC），再通过规则触发切换到无线驱动态
+
+## 前置依赖
 
 ```shell
 sudo apt update
 sudo apt install dkms build-essential linux-headers-$(uname -r)
 ```
 
-### Step 2: 运行本机接入脚本
+## 快速开始
 
-```shell
-chmod +x scripts/dkms-local-install.sh
-./scripts/dkms-local-install.sh
-```
+以下命令默认在仓库根目录执行。
 
-说明：脚本会自动安装 `src/AIC8800/aic.rules` 到 `/etc/udev/rules.d/aic.rules`，
-通过 `eject` 触发 `a69c:5721 (Aic MSC)` 从存储态切换到无线驱动态。
-同时会自动同步固件目录 `src/AIC8800/fw/aic8800DC` 到 `/lib/firmware/aic8800DC`。
+1. 本机当前内核安装
 
-可选：指定目标内核版本
+   ```shell
+   chmod +x code/scripts/dkms-local-install.sh
+   ./code/scripts/dkms-local-install.sh
+   ```
 
-```shell
-./scripts/dkms-local-install.sh 6.8.0-xx-generic
-```
+2. 指定目标内核安装（可选）
 
-可选：一键刷新所有已安装 headers 的内核
+   ```shell
+   ./code/scripts/dkms-local-install.sh 6.8.0-xx-generic
+   ```
 
-```shell
-chmod +x scripts/dkms-refresh-all-kernels.sh
-./scripts/dkms-refresh-all-kernels.sh
-```
+3. 刷新所有已安装 headers 的内核（可选）
 
-可选：清理旧版本驱动
+   ```shell
+   chmod +x code/scripts/dkms-refresh-all-kernels.sh
+   ./code/scripts/dkms-refresh-all-kernels.sh
+   ```
 
-```shell
-chmod +x scripts/dkms-clean-old-versions.sh
-./scripts/dkms-clean-old-versions.sh
-```
+4. 清理旧版本 DKMS 记录（可选）
 
-### Step 3: 验证
+   ```shell
+   chmod +x code/scripts/dkms-clean-old-versions.sh
+   ./code/scripts/dkms-clean-old-versions.sh
+   ```
+
+脚本行为说明：
+
+- 复制源码目录 `code/src/AIC8800/drivers/aic8800` 到 `/usr/src/aic8800fdrv-<version>/`
+- 同步 `dkms.conf` 中的 `PACKAGE_VERSION`
+- 安装固件目录 `code/src/AIC8800/fw/aic8800DC` 到 `/lib/firmware/aic8800DC`
+- 安装 udev 规则 `code/src/AIC8800/aic.rules` 到 `/etc/udev/rules.d/aic.rules`
+
+## 安装后验证
 
 ```shell
 dkms status | grep aic8800fdrv
@@ -56,7 +72,7 @@ sudo modprobe aic8800_fdrv
 lsmod | grep -E "aic_load_fw|aic8800_fdrv"
 ```
 
-如果当前这次开机仍停留在 `Aic MSC`，先执行一次安全热触发（不强制绑驱动）：
+如果设备仍停留在 Aic MSC，可做一次安全热触发：
 
 ```shell
 sudo udevadm control --reload
@@ -66,86 +82,82 @@ sudo eject /dev/aicudisk
 sudo dmesg -w | grep -Ei "aic|usb|firmware|rwnx"
 ```
 
-注意：不建议再使用 `unbind/bind` 强制切换接口，容易导致 USB 栈异常或系统卡死。
+不建议使用 `unbind/bind` 强制切换 USB 接口，这可能导致 USB 栈异常。
 
 ## 版本维护
 
-- 驱动版本统一维护在仓库根目录 `VERSION`。
-- 本机 DKMS 脚本会读取 `VERSION`，并在复制到 `/usr/src/aic8800fdrv-<version>/` 后自动同步 `dkms.conf` 中的 `PACKAGE_VERSION`。
-- 可使用统一版本同步脚本：
+统一版本文件为 `code/VERSION`。
+
+需要同步版本号时执行：
 
 ```shell
-chmod +x scripts/sync-version.sh
-./scripts/sync-version.sh 1.0.7
+chmod +x code/scripts/sync-version.sh
+./code/scripts/sync-version.sh 1.0.9
 ```
 
-## 自动重建模拟验证（标准回归用例）
+该脚本会同步以下文件：
 
-用于在“不切换当前运行内核”的前提下，模拟“升级到新内核后 DKMS 自动重建”。
+- `code/VERSION`
+- `code/src/AIC8800/drivers/aic8800/dkms.conf`
+- `code/src/DEBIAN/control`
 
-### Step 1: 选择一个非当前内核且有 headers 的目标内核
+## DKMS 自动重建回归用例
 
-```shell
-uname -r
-ls -1 /lib/modules | sort
-ls -1 /usr/src | grep -E '^linux-headers-' | sort
-```
+目标：在不切换当前运行内核的前提下，模拟系统升级后 DKMS 自动重建行为。
 
-示例目标内核：`6.8.0-90-generic`
+1. 选择目标内核（非当前内核，且已安装 headers）
 
-### Step 2: 触发自动重建模拟
+   ```shell
+   uname -r
+   ls -1 /lib/modules | sort
+   ls -1 /usr/src | grep -E '^linux-headers-' | sort
+   ```
+
+2. 触发自动重建
+
+   ```shell
+   TARGET=6.8.0-90-generic
+   sudo dkms autoinstall -k "$TARGET"
+   dkms status | grep aic8800fdrv
+   ```
+
+3. 若提示同版本已存在，强制安装 DKMS 产物
+
+   ```shell
+   TARGET=6.8.0-90-generic
+   VER="$(cat code/VERSION)"
+   sudo dkms uninstall -m aic8800fdrv -v "$VER" -k "$TARGET" || true
+   sudo dkms install -m aic8800fdrv -v "$VER" -k "$TARGET" --force
+   ```
+
+4. 验证目标内核模块路径
+
+   ```shell
+   TARGET=6.8.0-90-generic
+   modinfo -k "$TARGET" aic8800_fdrv | grep '^filename'
+   modinfo -k "$TARGET" aic_load_fw | grep '^filename'
+   ```
+
+   期望输出路径包含 `/lib/modules/<target>/updates/dkms/`。
+
+5. 通过判定
+
+- `dkms status` 出现 `aic8800fdrv/<version>, <target-kernel>, x86_64: installed`
+- `modinfo -k <target-kernel>` 显示两个模块均来自 `updates/dkms`
+
+## 清理回滚
+
+仅清理某个目标内核：
 
 ```shell
 TARGET=6.8.0-90-generic
-sudo dkms autoinstall -k "$TARGET"
-dkms status | grep aic8800fdrv
-```
-
-### Step 3: 若提示同版本已存在，强制安装 DKMS 产物
-
-```shell
-TARGET=6.8.0-90-generic
-sudo dkms uninstall -m aic8800fdrv -v "$(cat VERSION)" -k "$TARGET" || true
-sudo dkms install -m aic8800fdrv -v "$(cat VERSION)" -k "$TARGET" --force
-```
-
-### Step 4: 验证目标内核使用的是 updates/dkms 模块
-
-```shell
-TARGET=6.8.0-90-generic
-modinfo -k "$TARGET" aic8800_fdrv | grep '^filename'
-modinfo -k "$TARGET" aic_load_fw | grep '^filename'
-```
-
-期望输出路径包含：`/lib/modules/<target>/updates/dkms/`
-
-### Step 5: 回归通过判定
-
-- `dkms status` 中出现 `aic8800fdrv/<version>, <target-kernel>, x86_64: installed`
-- `modinfo -k <target-kernel>` 显示两个模块都来自 `updates/dkms`
-
-### Step 6: 清理回滚（回归后恢复环境）
-
-仅删除某个目标内核上的 DKMS 安装：
-
-```shell
-TARGET=6.8.0-90-generic
-VER="$(cat VERSION)"
+VER="$(cat code/VERSION)"
 sudo dkms uninstall -m aic8800fdrv -v "$VER" -k "$TARGET" || true
 sudo dkms remove -m aic8800fdrv -v "$VER" -k "$TARGET" || true
 ```
 
-验证清理结果：
+清理全部内核：
 
 ```shell
-TARGET=6.8.0-90-generic
-dkms status | grep aic8800fdrv || true
-modinfo -k "$TARGET" aic8800_fdrv 2>/dev/null || echo "aic8800_fdrv not found for $TARGET"
-modinfo -k "$TARGET" aic_load_fw 2>/dev/null || echo "aic_load_fw not found for $TARGET"
-```
-
-如果要连同当前内核一起全部清理：
-
-```shell
-sudo dkms remove -m aic8800fdrv -v "$(cat VERSION)" --all
+sudo dkms remove -m aic8800fdrv -v "$(cat code/VERSION)" --all
 ```

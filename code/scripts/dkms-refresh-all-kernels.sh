@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+info() { echo "[INFO] $*"; }
+warn() { echo "[WARN] $*"; }
+error() { echo "[ERROR] $*" >&2; }
+
+require_cmd() {
+    if ! command -v "$1" >/dev/null 2>&1; then
+        error "required command not found: $1"
+        exit 1
+    fi
+}
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODULE_NAME="aic8800fdrv"
 VERSION_FILE="$REPO_ROOT/VERSION"
@@ -11,23 +22,21 @@ RULES_SRC="$REPO_ROOT/src/AIC8800/aic.rules"
 RULES_DST="/etc/udev/rules.d/aic.rules"
 
 if [[ ! -f "$VERSION_FILE" ]]; then
-    echo "[ERROR] VERSION file not found: $VERSION_FILE" >&2
+    error "VERSION file not found: $VERSION_FILE"
     exit 1
 fi
 
 if [[ ! -d "$SOURCE_DIR" ]]; then
-    echo "[ERROR] Source directory not found: $SOURCE_DIR" >&2
+    error "source directory not found: $SOURCE_DIR"
     exit 1
 fi
 
-if ! command -v dkms >/dev/null 2>&1; then
-    echo "[ERROR] dkms is not installed. Please install dkms first." >&2
-    exit 1
-fi
+require_cmd dkms
+require_cmd sudo
 
 VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
 if [[ -z "$VERSION" ]]; then
-    echo "[ERROR] VERSION file is empty." >&2
+    error "VERSION file is empty"
     exit 1
 fi
 
@@ -39,26 +48,26 @@ mapfile -t KERNELS < <(
 )
 
 if [[ ${#KERNELS[@]} -eq 0 ]]; then
-    echo "[ERROR] No kernel headers found under /usr/src." >&2
+    error "no kernel headers found under /usr/src"
     exit 1
 fi
 
 DKMS_SRC_DIR="/usr/src/${MODULE_NAME}-${VERSION}"
 
-echo "[INFO] Module : $MODULE_NAME"
-echo "[INFO] Version: $VERSION"
-echo "[INFO] Kernels with headers: ${KERNELS[*]}"
-echo "[INFO] Copy source to: $DKMS_SRC_DIR"
+info "Module : $MODULE_NAME"
+info "Version: $VERSION"
+info "Kernels with headers: ${KERNELS[*]}"
+info "Copy source to: $DKMS_SRC_DIR"
 
 sudo rm -rf "$DKMS_SRC_DIR"
 sudo mkdir -p "$DKMS_SRC_DIR"
 sudo cp -a "$SOURCE_DIR/." "$DKMS_SRC_DIR/"
 sudo sed -i "s/^PACKAGE_VERSION=.*/PACKAGE_VERSION=\"$VERSION\"/" "$DKMS_SRC_DIR/dkms.conf"
 
-echo "[INFO] Reset DKMS state for this version"
+info "Reset DKMS state for this version"
 sudo dkms remove -m "$MODULE_NAME" -v "$VERSION" --all >/dev/null 2>&1 || true
 
-echo "[INFO] dkms add"
+info "dkms add"
 sudo dkms add -m "$MODULE_NAME" -v "$VERSION"
 
 FAILED=0
@@ -83,28 +92,28 @@ for kernel_ver in "${KERNELS[@]}"; do
     fi
 done
 
-echo "[INFO] Final DKMS status"
+info "Final DKMS status"
 dkms status | grep "$MODULE_NAME" || true
 
-echo "[INFO] Install firmware files"
+info "Install firmware files"
 if [[ -d "$FW_SRC_DIR" ]]; then
     sudo rm -rf "$FW_DST_DIR"
     sudo mkdir -p "$FW_DST_DIR"
     sudo cp -a "$FW_SRC_DIR/." "$FW_DST_DIR/"
 else
-    echo "[WARN] firmware source not found: $FW_SRC_DIR"
+    warn "firmware source not found: $FW_SRC_DIR"
 fi
 
-echo "[INFO] Install udev rule for AIC MSC eject"
+info "Install udev rule for AIC MSC eject"
 if [[ -f "$RULES_SRC" ]]; then
     sudo install -m 0644 "$RULES_SRC" "$RULES_DST"
     sudo udevadm control --reload
     sudo udevadm trigger
 else
-    echo "[WARN] udev rule source not found: $RULES_SRC"
+    warn "udev rule source not found: $RULES_SRC"
 fi
 
-echo "[INFO] Remove old usb-storage quirk config if exists"
+info "Remove old usb-storage quirk config if exists"
 sudo rm -f /etc/modprobe.d/aic8800-usb-storage-quirks.conf
 
 if [[ $FAILED -ne 0 ]]; then
