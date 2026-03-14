@@ -9,4 +9,3 @@ include $(CLEAR_VARS)
 LOCAL_MODULE := wifi_test
 LOCAL_SRC_FILES := wifi_test.c
 include $(BUILD_EXECUTABLE)
-
