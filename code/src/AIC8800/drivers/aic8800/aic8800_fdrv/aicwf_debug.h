@@ -1,7 +1,4 @@
-
-
 #define RWNX_FN_ENTRY_STR ">>> %s()\n", __func__
-
 
 
 /* message levels */
@@ -10,6 +7,7 @@
 #define LOGTRACE		0x0004
 #define LOGDEBUG		0x0008
 #define LOGDATA			0x0010
+
 
 extern int aicwf_dbg_level;
 void rwnx_data_dump(char* tag, void* data, unsigned long len);
@@ -31,7 +29,6 @@ do {	\
 } while (0)
 
 
-
 #if 0
 #define RWNX_DBG(fmt, ...)	\
 	do {	\
@@ -47,6 +44,3 @@ do {	\
 	}	\
 } while (0)
 #endif
-
-
-

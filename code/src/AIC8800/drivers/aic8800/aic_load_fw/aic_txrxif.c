@@ -482,5 +482,3 @@ bool aicwf_frame_enq(struct device *dev, struct frame_queue *q, struct sk_buff *
 
     return p != NULL;
 }
-
-

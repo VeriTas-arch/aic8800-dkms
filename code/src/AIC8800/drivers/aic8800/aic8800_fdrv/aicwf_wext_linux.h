@@ -1,4 +1,3 @@
-
 struct scanu_result_wext{
 	struct list_head scanu_re_list;
 	struct cfg80211_bss *bss;
@@ -8,4 +7,3 @@ struct scanu_result_wext{
 
 void aicwf_set_wireless_ext( struct net_device *ndev, struct rwnx_hw *rwnx_hw);
 void aicwf_scan_complete_event(struct net_device *dev);
-

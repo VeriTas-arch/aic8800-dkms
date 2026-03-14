@@ -1,7 +1,4 @@
-
-
 #define RWNX_FN_ENTRY_STR ">>> %s()\n", __func__
-
 
 
 /* message levels */
@@ -47,6 +44,3 @@ do {	\
 	}	\
 } while (0)
 #endif
-
-
-

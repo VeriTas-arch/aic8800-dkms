@@ -55,6 +55,3 @@ ofst_chan_142_165=0
 xtal_enable=0
 xtal_cap=24
 xtal_cap_fine=31
-
-
-

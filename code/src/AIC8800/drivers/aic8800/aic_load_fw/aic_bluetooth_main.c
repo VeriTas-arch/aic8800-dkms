@@ -7,11 +7,11 @@
 #include "aicwf_txq_prealloc.h"
 
 
-#define DRV_CONFIG_FW_NAME             "fw.bin"
-#define DRV_DESCRIPTION  "AIC BLUETOOTH"
-#define DRV_COPYRIGHT    "Copyright(c) 2015-2020 AICSemi"
-#define DRV_AUTHOR       "AICSemi"
-#define DRV_VERS_MOD "1.0"
+#define DRV_CONFIG_FW_NAME  "fw.bin"
+#define DRV_DESCRIPTION     "AIC BLUETOOTH"
+#define DRV_COPYRIGHT       "Copyright(c) 2015-2020 AICSemi"
+#define DRV_AUTHOR          "AICSemi"
+#define DRV_VERS_MOD        "1.0"
 
 int testmode = FW_NORMAL_MODE;
 int adap_test = 0;
@@ -48,7 +48,7 @@ static void __exit aic_bluetooth_mod_exit(void)
 {
     printk("%s\n", __func__);
     aicwf_usb_exit();
-    
+
 #ifdef CONFIG_PREALLOC_RX_SKB
     aicwf_prealloc_exit();
 #endif
@@ -67,4 +67,3 @@ MODULE_DESCRIPTION(DRV_DESCRIPTION);
 MODULE_VERSION(DRV_VERS_MOD);
 MODULE_AUTHOR(DRV_COPYRIGHT " " DRV_AUTHOR);
 MODULE_LICENSE("GPL");
-

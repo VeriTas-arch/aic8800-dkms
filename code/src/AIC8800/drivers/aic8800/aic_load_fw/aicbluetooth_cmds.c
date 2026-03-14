@@ -467,6 +467,3 @@ int rwnx_send_reboot(struct aic_usb_dev *usbdev)
     ret = rwnx_send_dbg_start_app_req(usbdev, delay, HOST_START_APP_REBOOT);
     return ret;
 }
-
-
-

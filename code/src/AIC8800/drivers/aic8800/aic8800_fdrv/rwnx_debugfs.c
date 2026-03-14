@@ -10,7 +10,6 @@
  ******************************************************************************
  */
 
-
 #include <linux/kernel.h>
 #include <linux/kmod.h>
 #include <linux/debugfs.h>
@@ -1245,7 +1244,7 @@ static ssize_t rwnx_dbgfs_regdbg_write(struct file *file,
 
     	buf[len] = '\0';
 
-	if (sscanf(buf, "%x %x %x" , &oper, &addr, &val ) > 0) 
+	if (sscanf(buf, "%x %x %x" , &oper, &addr, &val ) > 0)
 		printk("addr=%x, val=%x,oper=%d\n", addr, val, oper);
 
     	if(oper== 0) {

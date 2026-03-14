@@ -6,11 +6,12 @@
 #include <net/if.h>
 #include<stdlib.h>
 #include <errno.h>
-#define WIFI_DRIVER_FW_PATH "sta"
+
+#define WIFI_DRIVER_FW_PATH     "sta"
 #define WIFI_DRIVER_MODULE_NAME "rwnx_fdrv"
 #define WIFI_DRIVER_MODULE_PATH "/vendor/modules/rwnx_fdrv.ko"
-#define MAX_DRV_CMD_SIZE 1536
-#define TXRX_PARA								SIOCDEVPRIVATE+1
+#define MAX_DRV_CMD_SIZE        1536
+#define TXRX_PARA				SIOCDEVPRIVATE+1
 
 static const char IFACE_DIR[]           = "";
 static const char DRIVER_MODULE_NAME[]  = "rwnx_fdrv";

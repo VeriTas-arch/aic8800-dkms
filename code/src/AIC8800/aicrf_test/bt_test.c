@@ -18,8 +18,8 @@
 #include <net/if.h>
 
 //tool role
-#define SERVER 0
-#define CLIENT 1
+#define SERVER      0
+#define CLIENT      1
 #define WLAN_CLIENT 2
 
 //interface
@@ -30,25 +30,25 @@
 //uart param
 #define BAUDRATE 1500000
 #define DATABITS 8
-#define PARTY 'N'
-#define STOP '1'
+#define PARTY   'N'
+#define STOP    '1'
 #define SOFTWARE_HANDSHAKE 0
 #define HARDWARE_HANDSHAKE 0
 
 //socket param
-#define BT_HCI_TOOL_PORT 5001
-#define SOCKER_BUFFER_SIZE 1024
+#define BT_HCI_TOOL_PORT    5001
+#define SOCKER_BUFFER_SIZE  1024
 
-#define OK 0
-#define ERR -1
-#define FALSE 0
-#define TRUE 1
+#define OK      0
+#define ERR     -1
+#define FALSE   0
+#define TRUE    1
 
 #define DOWN_FW_CFG             _IOW('E', 176, int)
 #define GET_USB_INFO            _IOR('E', 180, int)
 
 #define WLAN_CMD_MAX_CNT        256
-#define TXRX_PARA								SIOCDEVPRIVATE+1
+#define TXRX_PARA				SIOCDEVPRIVATE+1
 
 int server_or_client = SERVER;
 int interface = USB;

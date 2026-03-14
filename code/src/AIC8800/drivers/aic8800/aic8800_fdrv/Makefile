@@ -203,7 +203,7 @@ ccflags-$(CONFIG_VHT_FOR_OLD_KERNEL) += -DCONFIG_VHT_FOR_OLD_KERNEL
 ccflags-$(CONFIG_COEX) += -DCONFIG_COEX
 
 ccflags-y += -DCONFIG_RWNX_FULLMAC
-ccflags-y += -I$(src)/.
+ccflags-y += -I$(src)
 ccflags-$(CONFIG_RWNX_RADAR) += -DCONFIG_RWNX_RADAR
 ccflags-$(CONFIG_RWNX_MON_DATA) += -DCONFIG_RWNX_MON_DATA
 ccflags-$(CONFIG_RWNX_MON_XMIT) += -DCONFIG_RWNX_MON_XMIT
@@ -291,30 +291,11 @@ CONFIG_PLATFORM_AMLOGIC ?= n
 CONFIG_PLATFORM_UBUNTU ?= y
 
 ifeq ($(CONFIG_PLATFORM_ROCKCHIP), y)
-#KDIR ?= /home/yaya/E/Rockchip/3288/Android5/kernel/
-#ARCH ?= arm
-#CROSS_COMPILE ?= /home/yaya/D/Workspace/CyberQuantum/JinHaoYue/rk3288/prebuilts/gcc/linux-x86/arm/arm-eabi-4.6/bin/arm-eabi-
-#KDIR ?= /home/yaya/E/Rockchip/3229/Android7/RK3229_ANDROID7.1_v1.01_20170914/rk3229_Android7.1_v1.01_xml0914/kernel
-#ARCH ?= arm
-#CROSS_COMPILE ?= /home/yaya/E/Rockchip/3229/Android7/RK3229_ANDROID7.1_v1.01_20170914/rk3229_Android7.1_v1.01_xml0914/prebuilts/gcc/linux-x86/arm/arm-eabi-4.6/bin/arm-eabi-
-#KDIR  ?= /home/yaya/E/Rockchip/3229/Android9/rk3229_android9.0_box/kernel
-#ARCH ?= arm
-#CROSS_COMPILE ?= /home/yaya/E/Rockchip/3229/Android9/rk3229_android9.0_box/prebuilts/gcc/linux-x86/arm/gcc-linaro-6.3.1-2017.05-x86_64_arm-linux-gnueabihf/bin/arm-linux-gnueabihf-
-KDIR ?= /home/yaya/E/Rockchip/3566/firefly/Android11.0/Firefly-RK356X_Android11.0_git_20210824/RK356X_Android11.0/kernel
+# Override when building for Rockchip:
+#   make KDIR=/path/to/kernel ARCH=arm64 CROSS_COMPILE=/path/to/toolchain-prefix-
+KDIR ?= /path/to/kernel
 ARCH ?= arm64
-CROSS_COMPILE ?= /home/yaya/E/Rockchip/3566/Android11/rk3566_rk3568_android11_oranth/prebuilts/gcc/linux-x86/aarch64/gcc-linaro-6.3.1-2017.05-x86_64_aarch64-linux-gnu/bin/aarch64-linux-gnu-
-#ARCH ?= arm
-#CROSS_COMPILE ?=/home/yaya/D/Workspace/CyberQuantum/JinHaoYue/rk3288/prebuilts/gcc/linux-x86/arm/arm-eabi-4.6/bin/arm-eabi-
-#KDIR ?=/home/yaya/D/Workspace/CyberQuantum/JinHaoYue/rk3288/kernel
-#KDIR := /home/yaya/E/Rockchip/3566/Android/kernel
-#ARCH ?= arm64
-#CROSS_COMPILE ?= /home/yaya/E/Rockchip/3566/Android/prebuilts/gcc/linux-x86/aarch64/gcc-linaro-6.3.1-2017.05-x86_64_aarch64-linux-gnu/bin/aarch64-linux-gnu-
-#KDIR ?= /home/yaya/E/Rockchip/3566/Android11/rk3566_rk3568_android11_oranth/kernel
-#ARCH ?= arm64
-#CROSS_COMPILE ?= /home/yaya/E/Rockchip/3566/Android11/rk3566_rk3568_android11_oranth/prebuilts/gcc/linux-x86/aarch64/gcc-linaro-6.3.1-2017.05-x86_64_aarch64-linux-gnu/bin/aarch64-linux-gnu-
-#KDIR ?= /home/yaya/D/samba1/aiden/SDK/Rockchip/3588/Android12/RK3588_Android12.0/kernel-5.10
-#ARCH ?= arm64
-#CROSS_COMPILE ?= /home/yaya/D/samba1/aiden/SDK/Rockchip/3588/Android12/RK3588_Android12.0/prebuilts/gcc/linux-x86/aarch64/gcc-linaro-6.3.1-2017.05-x86_64_aarch64-linux-gnu/bin/aarch64-linux-gnu-
+CROSS_COMPILE ?= /path/to/toolchain-prefix-
 ccflags-y += -DANDROID_PLATFORM
 ccflags-y += -DCONFIG_PLATFORM_ROCKCHIP
 endif
@@ -341,11 +322,12 @@ endif
 ifeq ($(CONFIG_PLATFORM_UBUNTU), y)
 KDIR  ?= /lib/modules/$(shell uname -r)/build
 #KDIR ?= ~/D/Workspace/CyberQuantum/Linux/linux-4.15/
-PWD   ?= $(shell pwd)
+PWD   ?= $(CURDIR)
 KVER ?= $(shell uname -r)
 MODDESTDIR ?= /lib/modules/$(KVER)/kernel/drivers/net/wireless/aic8800
 ARCH ?= $(shell uname -m)
 CROSS_COMPILE ?=
+DEPMOD ?= depmod
 endif
 
 
@@ -356,12 +338,11 @@ modules:
 install:
 	mkdir -p $(MODDESTDIR)
 	install -p -m 644 $(MODULE_NAME).ko  $(MODDESTDIR)
-	/sbin/depmod -a ${KVER}
+	$(DEPMOD) -a ${KVER}
 
 uninstall:
 	rm -rfv $(MODDESTDIR)/$(MODULE_NAME).ko
-	/sbin/depmod -a ${KVER}
+	$(DEPMOD) -a ${KVER}
 
 clean:
 	rm -rf *.o *.ko *.o.* *.mod.* modules.* Module.* .a* .o* .*.o.* *.mod .tmp* .cache.mk
-

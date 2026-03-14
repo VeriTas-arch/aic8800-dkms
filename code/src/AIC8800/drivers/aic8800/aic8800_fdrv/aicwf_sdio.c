@@ -1247,5 +1247,3 @@ fail:
     aicwf_sdio_release(sdiodev);
     return NULL;
 }
-
-
