@@ -73,35 +73,35 @@ typedef struct android_wifi_priv_cmd {
 } android_wifi_priv_cmd;
 
 
-void helper(){
+void helper() {
     printf("\t<-s> to be tool service. ex. \"bt_test -s uart 115200 /dev/ttyS0\" or \"bt_test -s usb\" or \"bt_test -s wlan wlan0\"\n");
     //printf("\t<-s> to be tool service. ex. -s uart 115200 noflow and -s usb\n");
     printf("\t<-c> to send hci cmd to interface.\n");
     printf("\t<-w> to send wlan cmd to interface.\n");
 }
 
-int parse_cmd_line(int argc, char **argv){
+int parse_cmd_line(int argc, char **argv) {
     int command_number = argc;
     int command_counter = 1;
     int hci_command_counter = 0;
-    //int error_command = 0;
+    // int error_command = 0;
 
-    while(command_counter < command_number){
-        if(!strcmp(argv[command_counter], "-s")){
-            if(!(command_number >= 3)){
+    while (command_counter < command_number) {
+        if (!strcmp(argv[command_counter], "-s")) {
+            if (!(command_number >= 3)) {
                 printf("error command \r\n");
                 return ERR;
             }
             printf("bt_hci_tool server setting\r\n");
             server_or_client = SERVER;
             command_counter++;
-            if(!strcmp(argv[command_counter], "usb")){
+            if (!strcmp(argv[command_counter], "usb")) {
                 printf("use USB\r\n");
                 interface = USB;
                 return OK;
-            }else if(!strcmp(argv[command_counter], "uart")){
+            } else if (!strcmp(argv[command_counter], "uart")) {
                 interface = UART;
-                if(command_number != 5){
+                if (command_number != 5) {
                     printf("error command \r\n");
                     return ERR;
                 }
@@ -112,9 +112,9 @@ int parse_cmd_line(int argc, char **argv){
                 memcpy(dev_path, argv[command_counter], strlen(argv[command_counter]));
                 printf("use UART %d %s\r\n", atoi(s_baudrate), dev_path);
                 return OK;
-            }else if(!strcmp(argv[command_counter], "wlan")){
+            } else if (!strcmp(argv[command_counter], "wlan")) {
                 interface = WLAN;
-                if(command_number != 4){
+                if (command_number != 4) {
                     printf("error command \r\n");
                     return ERR;
                 }
@@ -122,15 +122,15 @@ int parse_cmd_line(int argc, char **argv){
                 memcpy(w_ifname, argv[command_counter], strlen(argv[command_counter]));
                 printf("use WLAN %s\r\n", w_ifname);
                 return OK;
-            }else{
+            } else {
                 printf("interface set error\r\n");
                 return ERR;
             }
-        }else if(!strcmp(argv[command_counter], "-c")){
+        } else if (!strcmp(argv[command_counter], "-c")) {
             server_or_client = CLIENT;
             command_counter++;
             hci_command_counter = 0;
-            while(command_counter < command_number){
+            while (command_counter < command_number){
                 s_hci_command[hci_command_counter++] = argv[command_counter];
                 command_counter++;
             }
@@ -148,7 +148,7 @@ int parse_cmd_line(int argc, char **argv){
                 command_counter++;
             }
             return OK;
-        }else{
+        } else {
             if (strcmp(argv[1], "-h") != 0) {
                 printf("unknow command %s \r\n", argv[command_counter]);
             }
@@ -295,7 +295,7 @@ void uart_set_options(int baudrate, int databits,
     }
     newtio.c_cflag |= CLOCAL | CREAD;
 
-    //parity
+    // parity
     newtio.c_cflag &= ~(PARENB | PARODD);
     if (parity == 'E')
     {
@@ -306,10 +306,10 @@ void uart_set_options(int baudrate, int databits,
         newtio.c_cflag |= (PARENB | PARODD);
     }
 
-    //hardware handshake
+    // hardware handshake
     newtio.c_cflag &= ~CRTSCTS;
 
-    //stopbits
+    // stopbits
     if (stop=='2')
     {
         newtio.c_cflag |= CSTOPB;
@@ -319,9 +319,9 @@ void uart_set_options(int baudrate, int databits,
         newtio.c_cflag &= ~CSTOPB;
     }
 
-    newtio.c_iflag=IGNBRK;
+    newtio.c_iflag = IGNBRK;
 
-    //software handshake
+    // software handshake
     if (softwareHandshake)
     {
         newtio.c_iflag |= IXON | IXOFF;
@@ -331,11 +331,11 @@ void uart_set_options(int baudrate, int databits,
         newtio.c_iflag &= ~(IXON|IXOFF|IXANY);
     }
 
-    newtio.c_lflag=0;
-    newtio.c_oflag=0;
+    newtio.c_lflag = 0;
+    newtio.c_oflag = 0;
 
-    //   newtio.c_cc[VTIME]=1;
-    //   newtio.c_cc[VMIN]=60;
+    // newtio.c_cc[VTIME]=1;
+    // newtio.c_cc[VMIN]=60;
 
     if (tcsetattr(bt_dev_fd, TCSANOW, &newtio)!=0)
     {
@@ -347,7 +347,7 @@ void uart_set_options(int baudrate, int databits,
         printf("tcsetattr() 4 failed \n");
     }
 
-    //hardware handshake
+    // hardware handshake
     if (hardwareHandshake)
     {
         newtio.c_cflag |= CRTSCTS;
@@ -364,44 +364,44 @@ void uart_set_options(int baudrate, int databits,
 }
 
 
-unsigned char atoh(char* s_data){
+unsigned char atoh(char* s_data) {
     unsigned char ret_value;
     char temp_value = 0;
 
-    //h
-    if(s_data[0] >= 48 && s_data[0] <= 57){
+    // h
+    if (s_data[0] >= 48 && s_data[0] <= 57) {
         temp_value = s_data[0] - 48;
-    }else if(s_data[0] >= 65 && s_data[0] <= 70){
+    } else if (s_data[0] >= 65 && s_data[0] <= 70) {
         temp_value = (s_data[0] - 65) + 10;
-    }else if(s_data[0] >= 97 && s_data[0] <= 102){
+    } else if (s_data[0] >= 97 && s_data[0] <= 102) {
         temp_value = (s_data[0] - 97) + 10;
     }
 
     ret_value = temp_value;
     ret_value = ret_value << 4;
-    //printf("atoh1: ret_value:%x\r\n", ret_value);
-    //l
-    if(s_data[1] >= 48 && s_data[1] <= 57){
+    // printf("atoh1: ret_value:%x\r\n", ret_value);
+    // l
+    if (s_data[1] >= 48 && s_data[1] <= 57) {
         temp_value = s_data[1] - 48;
-    }else if(s_data[1] >= 65 && s_data[1] <= 70){
+    } else if (s_data[1] >= 65 && s_data[1] <= 70) {
         temp_value = (s_data[1] - 65) + 10;
-    }else if(s_data[1] >= 97 && s_data[1] <= 102){
+    } else if (s_data[1] >= 97 && s_data[1] <= 102) {
         temp_value = (s_data[1] - 97) + 10;
     }
 
     ret_value |= temp_value;
-    //printf("atoh2: ret_value:%x\r\n", ret_value);
+    // printf("atoh2: ret_value:%x\r\n", ret_value);
 
     return ret_value;
 
 }
 
-int send_to_server(unsigned char* buffer, int len){
+int send_to_server(unsigned char* buffer, int len) {
     int client_socket;
     struct sockaddr_in serverAddr;
-    //unsigned long long package_totel_counter = 0;
+    // unsigned long long package_totel_counter = 0;
 
-    if((client_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0){
+    if ((client_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         return ERR;
     }
 
@@ -409,7 +409,7 @@ int send_to_server(unsigned char* buffer, int len){
     serverAddr.sin_port = htons(BT_HCI_TOOL_PORT);
     serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
 
-    if(connect(client_socket, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) < 0){
+    if (connect(client_socket, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) < 0) {
         return ERR;
     }
 
@@ -417,30 +417,29 @@ int send_to_server(unsigned char* buffer, int len){
     return OK;
 }
 
-void send_hci_command(){
+void send_hci_command() {
     int i = 0;
     int command_len = 0;
     unsigned char buffer[SOCKER_BUFFER_SIZE];
 
-//    printf("send hci command: \r\n");
+    // printf("send hci command: \r\n");
 
-    for(i = 0;i < 256; i++){
-        if(s_hci_command[i] == NULL){
+    for (i = 0;i < 256; i++) {
+        if (s_hci_command[i] == NULL) {
             command_len = i;
             break;
         }
 
         buffer[i] = atoh(s_hci_command[i]);
-//        printf("%02X ", buffer[i]);
+    // printf("%02X ", buffer[i]);
     }
 
     send_to_server(buffer, i);
 
-//    printf("\r\n");
+    // printf("\r\n");
 }
 
-void send_wlan_command(void)
-{
+void send_wlan_command(void) {
     int i = 0;
     int command_len = 0;
     unsigned char buffer[SOCKER_BUFFER_SIZE] = {0,};
@@ -452,18 +451,18 @@ void send_wlan_command(void)
     command_len = strlen((char*)&buffer[0]);
     printf("command_len:%d \r\n", command_len);
     if (command_len > 1) {
-        //command_len--; // rm last space
-        //buffer[command_len] = '\0';
+        // command_len--;  // rm last space
+        // buffer[command_len] = '\0';
         send_to_server(buffer, command_len);
     }
 }
 
-int hci_send(char* data, int len){
+int hci_send(char* data, int len) {
     int i = 0;
     unsigned char tmp_data[len];
 
     printf("COMMAND(%d): \r\n", len);
-    for(i = 0; i < len; i++){
+    for (i = 0; i < len; i++) {
         tmp_data[i] = (unsigned char)data[i];
         printf("%02X ", tmp_data[i]);
     }
@@ -478,9 +477,9 @@ int hci_send(char* data, int len){
 }
 
 
-int hci_recv(char* data, int len){
+int hci_recv(char* data, int len) {
     int i = 0;
-    unsigned char tmp_byte[64];// = 0x00;
+    unsigned char tmp_byte[64];  // = 0x00;
 
     memset(data, 0, len);
 
@@ -490,13 +489,13 @@ int hci_recv(char* data, int len){
         return FALSE;
     }
     printf("EVENT(%d): \r\n", len);
-    for(i = 0; i < len; i++){
+    for (i = 0; i < len; i++) {
         tmp_byte[i] = (unsigned char)data[i];
         printf("%02X ", tmp_byte[i]);
     }
     printf("\r\n");
 
-    if(tmp_byte[1] == 0x0D) {
+    if (tmp_byte[1] == 0x0D) {
         uint32_t rx_pkt_len = tmp_byte[4] | (tmp_byte[5] << 8) | (tmp_byte[6] << 16) | (tmp_byte[7] << 24);
         uint32_t total_rx_pkts = tmp_byte[8] | (tmp_byte[9] << 8) | (tmp_byte[10] << 16) | (tmp_byte[11] << 24);
         uint32_t rx_ok_pkts = tmp_byte[12] | (tmp_byte[13] << 8) | (tmp_byte[14] << 16) | (tmp_byte[15] << 24);
@@ -510,8 +509,7 @@ int hci_recv(char* data, int len){
     return len;
 }
 
-int wlan_send(char *data, int len)
-{
+int wlan_send(char *data, int len) {
     int sock;
     struct ifreq ifr;
     int ret = 0;
@@ -609,7 +607,7 @@ int wlan_send(char *data, int len)
             buf_len += strlen(bt_stop_hci_cmd);
             priv_cmd.used_len = buf_len;
     } else if ((strcasecmp(wl_cmd, "BT_DATA") == 0)) {
-            //char bt_raw_data_cmd[255];
+            // char bt_raw_data_cmd[255];
             int arg_len = strlen(wl_cmd);
             buf_len = priv_cmd.used_len;
             memcpy(&priv_cmd.buf[arg_len+1], &priv_cmd.buf[arg_len+1], buf_len - arg_len - 1);
@@ -647,20 +645,20 @@ int wlan_send(char *data, int len)
     return OK;
 }
 
-int dev_open(){
+int dev_open() {
     int n = 0;
 
     bt_dev_fd = open(dev_path, O_RDWR | O_NDELAY);
-    if(bt_dev_fd < 0) {
+    if (bt_dev_fd < 0) {
         printf("dev_path %s fail to open \r\n", dev_path);
         return ERR;
     }
-    if(interface == UART){
+    if (interface == UART) {
         tcflush(bt_dev_fd, TCIOFLUSH);
         n = fcntl(bt_dev_fd, F_GETFL, 0);
         fcntl(bt_dev_fd, F_SETFL, n & ~O_NDELAY);
         uart_set_options(/*BAUDRATE*/atoi(s_baudrate), DATABITS, PARTY, STOP, SOFTWARE_HANDSHAKE, HARDWARE_HANDSHAKE);
-    }else{
+    } else {
         ioctl(bt_dev_fd, DOWN_FW_CFG);
         ioctl(bt_dev_fd, GET_USB_INFO);
     }
@@ -668,12 +666,12 @@ int dev_open(){
     return OK;
 }
 
-void dev_close(){
+void dev_close() {
     close(bt_dev_fd);
 }
 
 
-int socket_init(){
+int socket_init() {
     int client;
     int server_socket;
     struct sockaddr_in server_addr;
@@ -682,30 +680,30 @@ int socket_init(){
     char buffer[SOCKER_BUFFER_SIZE];
     int recv_len = 0;
 
-    if((server_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0){
+    if ((server_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         return ERR;
     }
 
-    //bzero(&server_addr, sizeof(server_addr));
+    // bzero(&server_addr, sizeof(server_addr));
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(BT_HCI_TOOL_PORT);
     server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    //setsockopt(server_socket ,SOL_SOCKET ,SO_REUSEADDR,(const char*)&bReuseaddr,sizeof(BOOL));
+    // setsockopt(server_socket ,SOL_SOCKET ,SO_REUSEADDR,(const char*)&bReuseaddr,sizeof(BOOL));
 
-    if(bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0){
+    if (bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         printf("binding error\r\n");
         return ERR;
     }
 
-    if(listen(server_socket, 5) < 0){
+    if (listen(server_socket, 5) < 0) {
         printf("listen error");
         return ERR;
     }
 
-    while(1){
+    while(1) {
         client = accept(server_socket, (struct sockaddr*)&clientAddr, (socklen_t*)&addr_len);
-        if(client == ERR){
+        if (client == ERR) {
             return 0;
         }
         recv_len = recv(client, buffer, SOCKER_BUFFER_SIZE, 0);
@@ -718,25 +716,25 @@ int socket_init(){
 }
 
 
-void* hci_recv_thread( void *arg ){
+void* hci_recv_thread( void *arg ) {
     printf("hci recv thread ready %p\r\n", arg);
-    while(1){
+    while(1) {
         hci_recv(hci_event, sizeof(hci_event));
-//        exit(0);
+        // exit(0);
     }
 }
 
-void start_server(){
+void start_server() {
     int ret = ERR;
     if ((interface == USB) || (interface == UART)) {
         pthread_t hci_recv_th;
-        //init bt communication
+        // init bt communication
         ret = dev_open();
         if(ret == ERR){
             printf("dev_open fail \r\n");
             return;
         }
-        //test to send reset
+        // test to send reset
         printf("to test hci reset for bt device\r\n");
         hci_send(hci_reset, sizeof(hci_reset));
         hci_recv(hci_event, sizeof(hci_event));
@@ -747,19 +745,19 @@ void start_server(){
         wlan_send(buf, strlen(buf));
     }
 
-        //init localhost socket
+        // init localhost socket
         ret = socket_init();
         if (!ret) {
             printf("socket init done\r\n");
         }
 }
 
-int main(int argc, char *argv[]){
+int main(int argc, char *argv[]) {
     int ret = parse_cmd_line(argc, argv);
     if (ret) {
         return ret;
     }
-    if(server_or_client == SERVER){
+    if (server_or_client == SERVER) {
         start_server();
     } else if (server_or_client == CLIENT) {
         send_hci_command();
