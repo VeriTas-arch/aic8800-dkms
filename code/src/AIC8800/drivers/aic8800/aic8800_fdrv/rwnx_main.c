@@ -55,6 +55,8 @@
 #endif
 #include <linux/semaphore.h>
 
+extern void rwnx_conn_track_connect_start(u8 vif_idx, const u8 *bssid);
+
 #define RW_DRV_DESCRIPTION  "RivieraWaves 11nac driver for Linux cfg80211"
 #define RW_DRV_COPYRIGHT    "Copyright(c) 2015-2017 RivieraWaves"
 #define RW_DRV_AUTHOR       "RivieraWaves S.A.S"
@@ -3688,6 +3690,7 @@ static int rwnx_cfg80211_connect(struct wiphy *wiphy, struct net_device *dev,
 #endif
 
 	atomic_set(&rwnx_vif->drv_conn_state, (int)RWNX_DRV_STATUS_CONNECTING);
+    rwnx_conn_track_connect_start(rwnx_vif->vif_index, sme->bssid);
 
     if(is_wep) {
         if(sme->auth_type == NL80211_AUTHTYPE_AUTOMATIC) {
