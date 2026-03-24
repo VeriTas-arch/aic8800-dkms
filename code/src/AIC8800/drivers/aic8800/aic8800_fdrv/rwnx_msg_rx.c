@@ -1073,6 +1073,14 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
 
 
     if (!roamed) {//not roaming
+        if ((ind->status_code == 0) &&
+            (prev_drv_conn_state != RWNX_DRV_STATUS_CONNECTING)) {
+            AICWFDBG(LOGERROR,
+                     "%s evt:%u suppress connect_result due to unexpected prev_state:%d roamed_raw:%u\r\n",
+                     __func__, evt_id, prev_drv_conn_state, roamed_raw);
+            goto connect_ind_done;
+        }
+
         cfg80211_connect_result(dev, (const u8 *)ind->bssid.array, req_ie,
                                 assoc_req_ie_len, rsp_ie,
                                 assoc_rsp_ie_len, ind->status_code,
@@ -1173,6 +1181,7 @@ static inline int rwnx_rx_sm_disconnect_ind(struct rwnx_hw *rwnx_hw,
     struct sm_disconnect_ind *ind = (struct sm_disconnect_ind *)msg->param;
     struct rwnx_vif *rwnx_vif = rwnx_hw->vif_table[ind->vif_idx];
     struct net_device *dev;
+    int prev_drv_conn_state;
 #ifdef AICWF_RX_REORDER
     struct reord_ctrl_info *reord_info, *tmp;
     u8 *macaddr;
@@ -1188,6 +1197,12 @@ static inline int rwnx_rx_sm_disconnect_ind(struct rwnx_hw *rwnx_hw,
         return 0;
     }
     dev = rwnx_vif->ndev;
+    prev_drv_conn_state = atomic_read(&rwnx_vif->drv_conn_state);
+
+    AICWFDBG(LOGINFO,
+             "%s vif:%u reason:%u ft_over_ds:%u prev_state:%d up:%d\r\n",
+             __func__, ind->vif_idx, ind->reason_code,
+             ind->ft_over_ds, prev_drv_conn_state, rwnx_vif->up);
 
 	//rwnx_cfg80211_unlink_bss(rwnx_hw, rwnx_vif);
 
