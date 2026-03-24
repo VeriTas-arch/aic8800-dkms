@@ -807,6 +807,9 @@ static inline void cfg80211_chandef_create(struct cfg80211_chan_def *chandef,
         }
 }
 #endif
+
+static atomic_t rwnx_connect_evt_seq = ATOMIC_INIT(0);
+
 static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
                                          struct rwnx_cmd *cmd,
                                          struct ipc_e2a_msg *msg)
@@ -822,6 +825,11 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
     u16 assoc_rsp_ie_len;
     bool had_sta_ap;
     int prev_drv_conn_state;
+    bool duplicate_connect_success = false;
+    bool synthesized_roam = false;
+    bool have_prev_bssid = false;
+    u8 prev_bssid[ETH_ALEN] = {0};
+    u32 evt_id;
     unsigned int roamed_raw = 0;
     bool roamed = false;
 
@@ -839,7 +847,12 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
 	}
 	dev = rwnx_vif->ndev;
     had_sta_ap = (rwnx_vif->sta.ap != NULL);
+    if (had_sta_ap) {
+        memcpy(prev_bssid, rwnx_vif->sta.ap->mac_addr, ETH_ALEN);
+        have_prev_bssid = true;
+    }
     prev_drv_conn_state = atomic_read(&rwnx_vif->drv_conn_state);
+    evt_id = (u32)atomic_inc_return(&rwnx_connect_evt_seq);
 
     if (ind->ap_idx >= (NX_REMOTE_STA_MAX + NX_VIRT_DEV_MAX)) {
         AICWFDBG(LOGERROR, "%s invalid ap idx:%u\r\n", __func__, ind->ap_idx);
@@ -882,6 +895,33 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
         AICWFDBG(LOGERROR,
                  "%s suppress roaming report: no previous connected STA (had_ap=%d prev_state=%d)\r\n",
                  __func__, had_sta_ap, prev_drv_conn_state);
+    }
+
+    AICWFDBG(LOGINFO,
+             "%s evt:%u vif:%u ap:%u status:%u roamed_raw:%u roamed:%d prev_state:%d had_ap:%d prev_bssid:%pM new_bssid:%pM\r\n",
+             __func__, evt_id, ind->vif_idx, ind->ap_idx, ind->status_code,
+             roamed_raw, roamed, prev_drv_conn_state, had_sta_ap,
+             prev_bssid, ind->bssid.array);
+
+    /*
+     * Firmware may occasionally send invalid roamed and still report a successful
+     * connect while driver/cfg80211 are already connected. Avoid duplicate
+     * connect_result in that state, and convert to roam when BSSID changed.
+     */
+    if ((ind->status_code == 0) && !roamed && had_sta_ap &&
+        (prev_drv_conn_state == RWNX_DRV_STATUS_CONNECTED)) {
+        if (have_prev_bssid && memcmp(prev_bssid, ind->bssid.array, ETH_ALEN)) {
+            roamed = true;
+            synthesized_roam = true;
+            AICWFDBG(LOGERROR,
+                     "%s evt:%u synthesize roaming report after invalid/cleared roamed flag\r\n",
+                     __func__, evt_id);
+        } else {
+            duplicate_connect_success = true;
+            AICWFDBG(LOGERROR,
+                     "%s evt:%u suppress duplicate connect_result while already connected\r\n",
+                     __func__, evt_id);
+        }
     }
 
 
@@ -1016,11 +1056,20 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
 	}
 
 
-    AICWFDBG(LOGINFO, "%s ind->roamed:%d ind->status_code:%d rwnx_vif->drv_conn_state:%d\r\n",
+    AICWFDBG(LOGINFO, "%s evt:%u ind->roamed:%d ind->status_code:%d synth_roam:%d dup_conn:%d rwnx_vif->drv_conn_state:%d\r\n",
         __func__,
+        evt_id,
         roamed,
         ind->status_code,
+        synthesized_roam,
+        duplicate_connect_success,
         (int)atomic_read(&rwnx_vif->drv_conn_state));
+
+    if (duplicate_connect_success) {
+        AICWFDBG(LOGINFO, "%s evt:%u drop duplicate connect indication\r\n",
+                 __func__, evt_id);
+        goto connect_ind_done;
+    }
 
 
     if (!roamed) {//not roaming
@@ -1071,6 +1120,8 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
 #endif /*LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0)*/
             }
     }
+
+connect_ind_done:
     netif_tx_start_all_queues(dev);
     netif_carrier_on(dev);
 
