@@ -4,6 +4,9 @@
 # IDE
 **/.vscode
 
+# Temporary files
+**/.tmp
+
 ### Linux ###
 *~
 
