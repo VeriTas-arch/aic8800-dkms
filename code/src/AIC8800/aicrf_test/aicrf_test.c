@@ -66,7 +66,7 @@ int wifi_send_cmd_to_net_interface(const char* if_name, int argC, char *argV[])
 		return -1;
 	}
 
-//	printf("ifr.ifr_name = %s\n", ifr.ifr_name);
+	// printf("ifr.ifr_name = %s\n", ifr.ifr_name);
 	memset(&priv_cmd, 0, sizeof(priv_cmd));
 	memset(buf, 0, sizeof(buf));
 
@@ -279,7 +279,7 @@ int main(int argC, char *argV[])
 	char* rm = "rmmod";
 	char* ko = "rwnx_fdrv.ko";
 
-//	printf("enter!!!AIC    argC=%d    argV[0]=%s    argV[1]=%s    argV[2]=%s\n", argC, argV[0], argV[1],argV[2]);
+	// printf("enter!!!AIC    argC=%d    argV[0]=%s    argV[1]=%s    argV[2]=%s\n", argC, argV[0], argV[1],argV[2]);
 	if(argC >= 3)
 		wifi_send_cmd_to_net_interface(argV[1], argC, argV);
 	else
