@@ -944,7 +944,6 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
     bool report_connect_result = false;
     bool report_roamed = false;
     bool report_done = false;
-    bool link_up_applied = false;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
@@ -1050,20 +1049,6 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
             rwnx_conn_guard_note(RWNX_GUARD_DUP_CONNECTED);
         }
     }
-
-    if ((ind->status_code == 0) && !roamed) {
-        if (prev_drv_conn_state != RWNX_DRV_STATUS_CONNECTING) {
-            reject_connect_success = true;
-            rwnx_conn_guard_note(RWNX_GUARD_SUPPRESS_PREV_STATE);
-        } else if ((ind->vif_idx < RWNX_CONN_TRACK_VIF_MAX) &&
-                   rwnx_conn_reported_once[ind->vif_idx]) {
-            reject_connect_success = true;
-            rwnx_conn_guard_note(RWNX_GUARD_DUP_TXN_CONNECT);
-        }
-    }
-
-    if (duplicate_connect_success || reject_connect_success)
-        goto connect_ind_reject;
 
 
     // Fill-in the AP information
@@ -1185,7 +1170,6 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
         }
 #endif
 		atomic_set(&rwnx_vif->drv_conn_state, (int)RWNX_DRV_STATUS_CONNECTED);
-                link_up_applied = true;
 
     } else if (ind->status_code == WLAN_STATUS_NOT_SUPPORTED_AUTH_ALG) {
         if (rwnx_vif->wep_enabled) {
@@ -1212,7 +1196,24 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
         goto connect_ind_done;
     }
 
+    if (reject_connect_success)
+        goto connect_ind_done;
+
+
     if (!roamed) {//not roaming
+        if ((ind->status_code == 0) &&
+            (prev_drv_conn_state != RWNX_DRV_STATUS_CONNECTING)) {
+            rwnx_conn_guard_note(RWNX_GUARD_SUPPRESS_PREV_STATE);
+            goto connect_ind_done;
+        }
+
+        if ((ind->status_code == 0) &&
+            (ind->vif_idx < RWNX_CONN_TRACK_VIF_MAX) &&
+            rwnx_conn_reported_once[ind->vif_idx]) {
+            rwnx_conn_guard_note(RWNX_GUARD_DUP_TXN_CONNECT);
+            goto connect_ind_done;
+        }
+
         report_connect_result = true;
     }
     else {//roaming
@@ -1287,21 +1288,8 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
     }
 
 connect_ind_done:
-    if (link_up_applied) {
-        netif_tx_start_all_queues(dev);
-        netif_carrier_on(dev);
-    }
-
-    return 0;
-
-connect_ind_reject:
-    atomic_set(&rwnx_vif->drv_conn_state, (int)RWNX_DRV_STATUS_DISCONNECTED);
-    if (ind->vif_idx < RWNX_CONN_TRACK_VIF_MAX) {
-        rwnx_conn_reported_once[ind->vif_idx] = false;
-        rwnx_link_up_jiffies[ind->vif_idx] = 0;
-    }
-    netif_tx_stop_all_queues(dev);
-    netif_carrier_off(dev);
+    netif_tx_start_all_queues(dev);
+    netif_carrier_on(dev);
 
     return 0;
 }
@@ -1382,9 +1370,9 @@ static inline int rwnx_rx_sm_disconnect_ind(struct rwnx_hw *rwnx_hw,
              __func__, ind->vif_idx, ind->reason_code,
              ind->ft_over_ds, prev_drv_conn_state, rwnx_vif->up);
 
-    if ((ind->reason_code == 0) &&
-        ((prev_drv_conn_state == RWNX_DRV_STATUS_CONNECTING) ||
-         (recent_link_up && (rwnx_vif->sta.ap == NULL)))) {
+    if (((prev_drv_conn_state == RWNX_DRV_STATUS_CONNECTING) || recent_link_up) &&
+        (ind->reason_code == 0) &&
+        (rwnx_vif->sta.ap == NULL)) {
         rwnx_conn_guard_note(RWNX_GUARD_TRANSIENT_DISC);
         return 0;
     }
