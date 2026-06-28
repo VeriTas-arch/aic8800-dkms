@@ -62,6 +62,7 @@ fi
 
 require_cmd dkms
 require_cmd sudo
+require_cmd udevadm
 
 VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
 if [[ -z "$VERSION" ]]; then

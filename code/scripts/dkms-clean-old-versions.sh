@@ -5,6 +5,14 @@ info() { echo "[INFO] $*"; }
 warn() { echo "[WARN] $*"; }
 error() { echo "[ERROR] $*" >&2; }
 
+
+require_cmd() {
+    if ! command -v "$1" >/dev/null 2>&1; then
+        error "required command not found: $1"
+        exit 1
+    fi
+}
+
 cleanup_legacy_module_dirs() {
     local modules_root="/lib/modules"
     local legacy_dir
@@ -31,10 +39,8 @@ if [[ ! -f "$VERSION_FILE" ]]; then
     exit 1
 fi
 
-if ! command -v dkms >/dev/null 2>&1; then
-    error "dkms is not installed. Please install dkms first"
-    exit 1
-fi
+require_cmd dkms
+require_cmd sudo
 
 KEEP_VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
 if [[ -z "$KEEP_VERSION" ]]; then
