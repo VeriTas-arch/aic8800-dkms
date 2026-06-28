@@ -11,6 +11,23 @@ info() { echo "[INFO] $*"; }
 warn() { echo "[WARN] $*"; }
 error() { echo "[ERROR] $*" >&2; }
 
+cleanup_legacy_module_dirs() {
+    local modules_root="/lib/modules"
+    local legacy_dir
+
+    [[ -d "$modules_root" ]] || return 0
+
+    for legacy_dir in "$modules_root"/*/kernel/drivers/net/wireless/aic8800; do
+        [[ -d "$legacy_dir" ]] || continue
+
+        if sudo rmdir "$legacy_dir" 2>/dev/null; then
+            info "Removed empty legacy module directory: $legacy_dir"
+        else
+            warn "Legacy module directory is not empty, keeping: $legacy_dir"
+        fi
+    done
+}
+
 require_cmd() {
     if ! command -v "$1" >/dev/null 2>&1; then
         error "required command not found: $1"
@@ -73,6 +90,7 @@ info "Refresh old DKMS state if exists"
 # Keep previous behavior: remove existing entries of this version before re-adding.
 # This ensures source and dkms metadata stay in sync for a clean local reinstall.
 sudo dkms remove -m "$MODULE_NAME" -v "$VERSION" --all >/dev/null 2>&1 || true
+cleanup_legacy_module_dirs
 
 info "dkms add"
 sudo dkms add -m "$MODULE_NAME" -v "$VERSION"
