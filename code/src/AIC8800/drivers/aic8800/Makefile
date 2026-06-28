@@ -64,6 +64,7 @@ install:
 uninstall:
 	rm -rfv $(MODDESTDIR)/aic_load_fw.ko
 	rm -rfv $(MODDESTDIR)/aic8800_fdrv.ko
+	rmdir $(MODDESTDIR) 2>/dev/null || true
 	/sbin/depmod -a ${KVER}
 
 clean:
