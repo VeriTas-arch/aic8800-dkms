@@ -1,3 +1,31 @@
 #!/bin/bash
+set -e
+
+cleanup_legacy_module_dirs() {
+    local modules_root="/lib/modules"
+    local legacy_dir
+
+    [ -d "$modules_root" ] || return 0
+
+    for legacy_dir in "$modules_root"/*/kernel/drivers/net/wireless/aic8800; do
+        [ -d "$legacy_dir" ] || continue
+
+        # Only remove the driver-owned directory when it is empty.  Kernel
+        # package maintainer scripts can then remove their parent directories
+        # without being blocked by this third-party module directory.
+        if rmdir "$legacy_dir" 2>/dev/null; then
+            echo "[INFO] removed empty legacy module directory: $legacy_dir"
+        else
+            echo "[INFO] legacy module directory is not empty, keeping: $legacy_dir"
+        fi
+    done
+}
+
+case "${1:-}" in
+    purge|remove)
+        cleanup_legacy_module_dirs
+        ;;
+esac
+
 echo "[INFO] pure-DKMS mode: legacy deb postrm actions are disabled."
 exit 0

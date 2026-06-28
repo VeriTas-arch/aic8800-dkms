@@ -5,6 +5,23 @@ info() { echo "[INFO] $*"; }
 warn() { echo "[WARN] $*"; }
 error() { echo "[ERROR] $*" >&2; }
 
+cleanup_legacy_module_dirs() {
+    local modules_root="/lib/modules"
+    local legacy_dir
+
+    [[ -d "$modules_root" ]] || return 0
+
+    for legacy_dir in "$modules_root"/*/kernel/drivers/net/wireless/aic8800; do
+        [[ -d "$legacy_dir" ]] || continue
+
+        if sudo rmdir "$legacy_dir" 2>/dev/null; then
+            info "Removed empty legacy module directory: $legacy_dir"
+        else
+            warn "Legacy module directory is not empty, keeping: $legacy_dir"
+        fi
+    done
+}
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODULE_NAME="aic8800fdrv"
 VERSION_FILE="$REPO_ROOT/VERSION"
@@ -46,6 +63,7 @@ for version in "${versions[@]}"; do
 
     echo "[INFO] Removing old version: $version"
     if sudo dkms remove -m "$MODULE_NAME" -v "$version" --all; then
+        cleanup_legacy_module_dirs
         removed=$((removed + 1))
     else
         warn "Failed to remove $MODULE_NAME/$version"

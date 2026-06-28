@@ -98,6 +98,7 @@ install:
 
 uninstall:
 	rm -rfv $(MODDESTDIR)/$(MODULE_NAME).ko
+	rmdir $(MODDESTDIR) 2>/dev/null || true
 	/sbin/depmod -a ${KVER}
 
 clean:
