@@ -522,7 +522,9 @@ struct semaphore aicwf_deinit_sem;
 atomic_t aicwf_deinit_atomic;
 
 int aicwf_dbg_level = LOGERROR|LOGINFO;
-module_param(aicwf_dbg_level, int, 0660);
+module_param(aicwf_dbg_level, int, 0644);
+MODULE_PARM_DESC(aicwf_dbg_level,
+                 "Log mask: 0x1 error, 0x2 info, 0x4 trace, 0x8 debug, 0x10 data");
 
 int testmode = 0;
 char aic_fw_path[200];
@@ -3030,8 +3032,7 @@ static struct wireless_dev *rwnx_virtual_interface_add(struct rwnx_hw *rwnx_hw,
 
     memcpy(vif->wdev.address, rwnx_hw->wiphy->perm_addr, ETH_ALEN);
     vif->wdev.address[5] ^= vif_idx;
-    AICWFDBG(LOGERROR, "p2p dev addr=%x %x %x %x %x %x\n", vif->wdev.address[0], vif->wdev.address[1], \
-        vif->wdev.address[2], vif->wdev.address[3], vif->wdev.address[4], vif->wdev.address[5]);
+    AICWFDBG(LOGDEBUG, "P2P device address initialized\n");
 
     return wdev;
 }
@@ -3703,15 +3704,14 @@ static int rwnx_cfg80211_connect(struct wiphy *wiphy,
         if (prev_state != RWNX_DRV_STATUS_CONNECTED ||
             !rwnx_vif->sta.ap) {
             AICWFDBG(LOGERROR,
-                     "connect rejected: roam without active AP state:%d prev:%pM\r\n",
-                     prev_state, sme->prev_bssid);
+                     "connect rejected: roam without active AP state:%d prev_set:1\r\n",
+                     prev_state);
             return -ENOTCONN;
         }
         if (memcmp(sme->prev_bssid, rwnx_vif->sta.ap->mac_addr,
                    ETH_ALEN)) {
             AICWFDBG(LOGERROR,
-                     "connect rejected: stale prev_bssid expected:%pM actual:%pM\r\n",
-                     sme->prev_bssid, rwnx_vif->sta.ap->mac_addr);
+                     "connect rejected: stale prev_bssid mismatch:1\r\n");
             return -ESTALE;
         }
         kind = RWNX_CONN_TXN_ROAM;
@@ -8818,6 +8818,19 @@ if((g_rwnx_plat->usbdev->chipid == PRODUCT_ID_AIC8801) ||
     rwnx_hw->wiphy = wiphy;
     rwnx_hw->plat = rwnx_plat;
     rwnx_hw->dev = rwnx_platform_get_dev(rwnx_plat);
+    atomic_set(&rwnx_hw->runtime_stats.roam_tx_pauses, 0);
+    atomic_set(&rwnx_hw->runtime_stats.roam_tx_resume_immediate, 0);
+    atomic_set(&rwnx_hw->runtime_stats.roam_tx_resume_deferred_tbusy, 0);
+    atomic_set(&rwnx_hw->runtime_stats.roam_tx_resume_blocked, 0);
+    atomic_set(&rwnx_hw->runtime_stats.usb_rx_submit_failures, 0);
+    atomic_set(&rwnx_hw->runtime_stats.usb_rx_refill_failures, 0);
+    atomic_set(&rwnx_hw->runtime_stats.usb_rx_state_rejects, 0);
+    atomic_set(&rwnx_hw->runtime_stats.usb_rx_queue_overflows, 0);
+    atomic_set(&rwnx_hw->runtime_stats.usb_tx_submit_failures, 0);
+    atomic_set(&rwnx_hw->runtime_stats.usb_tx_no_buffers, 0);
+    atomic_set(&rwnx_hw->runtime_stats.usb_tx_state_rejects, 0);
+    atomic_set(&rwnx_hw->runtime_stats.usb_flow_stops, 0);
+    atomic_set(&rwnx_hw->runtime_stats.usb_flow_wakes, 0);
 #ifdef AICWF_SDIO_SUPPORT
     rwnx_hw->sdiodev = rwnx_plat->sdiodev;
     rwnx_plat->sdiodev->rwnx_hw = rwnx_hw;
@@ -9220,7 +9233,9 @@ static int __init rwnx_mod_init(void)
     RWNX_DBG(RWNX_FN_ENTRY_STR);
     rwnx_print_version();
 	AICWFDBG(LOGINFO, "RELEASE DATE:%s \r\n", RELEASE_DATE);
-	AICWFDBG(LOGINFO, "conn_txn_revision=3 timeout_ms=12000 late_disconnect_guard_ms=1500 roam_carrier_preserve=1\r\n");
+	AICWFDBG(LOGINFO,
+	         "conn_txn_revision=3 log_schema=2 runtime_stats=1 log_mask=0x%x timeout_ms=12000 late_disconnect_guard_ms=1500 roam_carrier_preserve=1\r\n",
+	         READ_ONCE(aicwf_dbg_level));
 	rwnx_init_cmd_array();
 
 	sema_init(&aicwf_deinit_sem, 1);

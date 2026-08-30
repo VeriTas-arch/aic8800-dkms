@@ -18,9 +18,11 @@ int adap_test = 0;
 char paringid[100];
 int n_para = 1;
 int ble_scan_wakeup_reboot_time = 1000;
-int aicwf_dbg_level = LOGERROR|LOGINFO|LOGDEBUG|LOGTRACE;
+int aicwf_dbg_level = LOGERROR|LOGINFO;
 
-module_param(aicwf_dbg_level, int, 0660);
+module_param(aicwf_dbg_level, int, 0644);
+MODULE_PARM_DESC(aicwf_dbg_level,
+                 "Log mask: 0x1 error, 0x2 info, 0x4 trace, 0x8 debug, 0x10 data");
 module_param(ble_scan_wakeup_reboot_time, int, 0660);
 module_param(testmode, int, 0660);
 module_param(adap_test, int, 0660);

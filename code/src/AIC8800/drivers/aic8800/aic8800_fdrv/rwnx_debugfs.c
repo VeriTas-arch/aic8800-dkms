@@ -18,6 +18,7 @@
 
 #include "rwnx_debugfs.h"
 #include "rwnx_msg_tx.h"
+#include "rwnx_msg_rx.h"
 #include "rwnx_radar.h"
 #include "rwnx_tx.h"
 
@@ -668,6 +669,69 @@ static ssize_t rwnx_dbgfs_sys_stats_read(struct file *file,
 }
 
 DEBUGFS_READ_FILE_OPS(sys_stats);
+
+static ssize_t rwnx_dbgfs_runtime_stats_read(struct file *file,
+                                             char __user *user_buf,
+                                             size_t count, loff_t *ppos)
+{
+    struct rwnx_hw *priv = file->private_data;
+    struct rwnx_runtime_stats *stats = &priv->runtime_stats;
+    const size_t bufsz = 1024;
+    char *buf;
+    int len;
+    ssize_t read;
+
+    buf = kmalloc(bufsz, GFP_KERNEL);
+    if (!buf)
+        return -ENOMEM;
+
+    len = rwnx_conn_guard_stats_format(buf, bufsz);
+    len += scnprintf(buf + len, bufsz - len,
+                     "roam_tx_pauses=%d\n",
+                     atomic_read(&stats->roam_tx_pauses));
+    len += scnprintf(buf + len, bufsz - len,
+                     "roam_tx_resume_immediate=%d\n",
+                     atomic_read(&stats->roam_tx_resume_immediate));
+    len += scnprintf(buf + len, bufsz - len,
+                     "roam_tx_resume_deferred_tbusy=%d\n",
+                     atomic_read(&stats->roam_tx_resume_deferred_tbusy));
+    len += scnprintf(buf + len, bufsz - len,
+                     "roam_tx_resume_blocked=%d\n",
+                     atomic_read(&stats->roam_tx_resume_blocked));
+    len += scnprintf(buf + len, bufsz - len,
+                     "usb_rx_submit_failures=%d\n",
+                     atomic_read(&stats->usb_rx_submit_failures));
+    len += scnprintf(buf + len, bufsz - len,
+                     "usb_rx_refill_failures=%d\n",
+                     atomic_read(&stats->usb_rx_refill_failures));
+    len += scnprintf(buf + len, bufsz - len,
+                     "usb_rx_state_rejects=%d\n",
+                     atomic_read(&stats->usb_rx_state_rejects));
+    len += scnprintf(buf + len, bufsz - len,
+                     "usb_rx_queue_overflows=%d\n",
+                     atomic_read(&stats->usb_rx_queue_overflows));
+    len += scnprintf(buf + len, bufsz - len,
+                     "usb_tx_submit_failures=%d\n",
+                     atomic_read(&stats->usb_tx_submit_failures));
+    len += scnprintf(buf + len, bufsz - len,
+                     "usb_tx_no_buffers=%d\n",
+                     atomic_read(&stats->usb_tx_no_buffers));
+    len += scnprintf(buf + len, bufsz - len,
+                     "usb_tx_state_rejects=%d\n",
+                     atomic_read(&stats->usb_tx_state_rejects));
+    len += scnprintf(buf + len, bufsz - len,
+                     "usb_flow_stops=%d\n",
+                     atomic_read(&stats->usb_flow_stops));
+    len += scnprintf(buf + len, bufsz - len,
+                     "usb_flow_wakes=%d\n",
+                     atomic_read(&stats->usb_flow_wakes));
+
+    read = simple_read_from_buffer(user_buf, count, ppos, buf, len);
+    kfree(buf);
+    return read;
+}
+
+DEBUGFS_READ_FILE_OPS(runtime_stats);
 
 #ifdef CONFIG_RWNX_MUMIMO_TX
 static ssize_t rwnx_dbgfs_mu_group_read(struct file *file,
@@ -2190,6 +2254,8 @@ int rwnx_dbgfs_register(struct rwnx_hw *rwnx_hw, const char *name)
                     S_IWUSR | S_IRUSR);
     DEBUGFS_ADD_FILE(stats, dir_drv, S_IWUSR | S_IRUSR);
     DEBUGFS_ADD_FILE(sys_stats, dir_drv,  S_IRUSR);
+    DEBUGFS_ADD_FILE(runtime_stats, dir_diags,
+                     S_IRUSR | S_IRGRP | S_IROTH);
     DEBUGFS_ADD_FILE(txq, dir_drv, S_IRUSR);
     DEBUGFS_ADD_FILE(acsinfo, dir_drv, S_IRUSR);
 #ifdef CONFIG_RWNX_MUMIMO_TX

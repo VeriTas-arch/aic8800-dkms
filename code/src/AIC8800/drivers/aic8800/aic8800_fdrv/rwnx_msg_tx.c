@@ -2226,7 +2226,6 @@ int rwnx_send_sm_connect_req(struct rwnx_hw *rwnx_hw,
     struct sm_connect_req *req;
     int i;
     u32_l flags = 0;
-    const u8 zero_bssid[ETH_ALEN] = {0};
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
@@ -2305,13 +2304,12 @@ int rwnx_send_sm_connect_req(struct rwnx_hw *rwnx_hw,
     /* Set UAPSD queues */
     req->uapsd_queues = rwnx_mod_params.uapsd_queues;
 
-	AICWFDBG(LOGINFO, "%s drv_vif_index:%d connect to %.*s(%zu) bssid:%pM prev:%pM channel:%d auth_type:%d reassoc:%d\r\n",
+	AICWFDBG(LOGINFO, "%s drv_vif_index:%d ssid_len:%zu target_set:%d prev_set:%d channel:%d auth_type:%d reassoc:%d\r\n",
 		__func__,
 		rwnx_vif->drv_vif_index,
-		(int)sme->ssid_len, sme->ssid,
 		sme->ssid_len,
-		req->bssid.array,
-		sme->prev_bssid ? sme->prev_bssid : zero_bssid,
+		!is_zero_ether_addr((const u8 *)req->bssid.array),
+		!!sme->prev_bssid,
 		req->chan.freq,
 		req->auth_type,
 		!!(flags & REASSOCIATION));

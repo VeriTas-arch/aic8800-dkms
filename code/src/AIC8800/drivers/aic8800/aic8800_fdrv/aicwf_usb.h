@@ -75,6 +75,15 @@ enum aicwf_usb_state {
     USB_SLEEP_ST
 };
 
+enum aicwf_usb_tx_wake_result {
+    AICWF_USB_TX_WAKE_IMMEDIATE,
+    AICWF_USB_TX_WAKE_DEFERRED_TBUSY,
+    AICWF_USB_TX_WAKE_BLOCKED_NO_DEVICE,
+    AICWF_USB_TX_WAKE_BLOCKED_BUS_DOWN,
+    AICWF_USB_TX_WAKE_BLOCKED_USB_DOWN,
+    AICWF_USB_TX_WAKE_BLOCKED_CARRIER,
+};
+
 struct aicwf_usb_buf {
     struct list_head list;
     struct aic_usb_dev *usbdev;
@@ -168,8 +177,9 @@ struct aic_usb_dev {
 extern void aicwf_usb_exit(void);
 extern void aicwf_usb_register(void);
 extern void aicwf_usb_tx_flowctrl(struct rwnx_hw *rwnx_hw, bool state);
-bool aicwf_usb_tx_maybe_wake(struct rwnx_hw *rwnx_hw,
-                             struct net_device *ndev);
+enum aicwf_usb_tx_wake_result
+aicwf_usb_tx_maybe_wake(struct rwnx_hw *rwnx_hw,
+                        struct net_device *ndev);
 void aicwf_usb_cancel_all_urbs(struct aic_usb_dev *usb_dev);
 #ifdef CONFIG_USB_MSG_IN_EP
 int usb_msg_busrx_thread(void *data);

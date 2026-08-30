@@ -863,6 +863,36 @@ static int rwnx_conn_guard_stats_last_report[RWNX_GUARD_STAT_MAX];
 static unsigned long rwnx_conn_guard_last_report_jiffies;
 static DEFINE_SPINLOCK(rwnx_conn_guard_report_lock);
 
+static const char * const rwnx_conn_guard_stat_names[RWNX_GUARD_STAT_MAX] = {
+    [RWNX_GUARD_INVALID_ROAMED] = "invalid_roamed",
+    [RWNX_GUARD_SUPPRESS_INVALID_ROAM] = "suppress_invalid_roam",
+    [RWNX_GUARD_DROP_STALE_SUCCESS] = "stale_success",
+    [RWNX_GUARD_SYNTH_ROAM] = "synth_roam",
+    [RWNX_GUARD_DUP_CONNECTED] = "dup_connected",
+    [RWNX_GUARD_DUP_IND] = "dup_ind",
+    [RWNX_GUARD_SUPPRESS_PREV_STATE] = "prev_state_suppress",
+    [RWNX_GUARD_DUP_TXN_CONNECT] = "dup_txn_connect",
+    [RWNX_GUARD_DUP_TXN_ROAM] = "dup_txn_roam",
+    [RWNX_GUARD_TRANSIENT_DISC] = "transient_disc",
+};
+
+int rwnx_conn_guard_stats_format(char *buf, size_t size)
+{
+    int len = 0;
+    int i;
+
+    len += scnprintf(buf + len, size - len, "connect_events=%d\n",
+                     atomic_read(&rwnx_connect_evt_seq));
+    len += scnprintf(buf + len, size - len, "connect_transactions=%d\n",
+                     atomic_read(&rwnx_connect_txn_seq));
+    for (i = 0; i < RWNX_GUARD_STAT_MAX && len < size; i++)
+        len += scnprintf(buf + len, size - len, "conn_guard_%s=%d\n",
+                         rwnx_conn_guard_stat_names[i],
+                         atomic_read(&rwnx_conn_guard_stats[i]));
+
+    return len;
+}
+
 static inline void rwnx_conn_guard_maybe_report(void)
 {
     unsigned long flags;
@@ -1132,21 +1162,95 @@ static void rwnx_conn_tx_abort_pause(struct rwnx_vif *rwnx_vif)
     atomic_set(&rwnx_vif->conn_tx_paused, 0);
 }
 
-static bool rwnx_conn_tx_resume(struct rwnx_vif *rwnx_vif)
+enum rwnx_conn_tx_resume_result {
+    RWNX_CONN_TX_RESUME_NOT_PAUSED,
+    RWNX_CONN_TX_RESUME_IMMEDIATE,
+    RWNX_CONN_TX_RESUME_DEFERRED_TBUSY,
+    RWNX_CONN_TX_RESUME_BLOCKED_VIF,
+    RWNX_CONN_TX_RESUME_BLOCKED_NO_DEVICE,
+    RWNX_CONN_TX_RESUME_BLOCKED_BUS_DOWN,
+    RWNX_CONN_TX_RESUME_BLOCKED_USB_DOWN,
+    RWNX_CONN_TX_RESUME_BLOCKED_CARRIER,
+};
+
+static const char *
+rwnx_conn_tx_resume_name(enum rwnx_conn_tx_resume_result result)
+{
+    switch (result) {
+    case RWNX_CONN_TX_RESUME_NOT_PAUSED:
+        return "not_paused";
+    case RWNX_CONN_TX_RESUME_IMMEDIATE:
+        return "immediate";
+    case RWNX_CONN_TX_RESUME_DEFERRED_TBUSY:
+        return "deferred_tbusy";
+    case RWNX_CONN_TX_RESUME_BLOCKED_VIF:
+        return "blocked_vif";
+    case RWNX_CONN_TX_RESUME_BLOCKED_NO_DEVICE:
+        return "blocked_no_device";
+    case RWNX_CONN_TX_RESUME_BLOCKED_BUS_DOWN:
+        return "blocked_bus_down";
+    case RWNX_CONN_TX_RESUME_BLOCKED_USB_DOWN:
+        return "blocked_usb_down";
+    case RWNX_CONN_TX_RESUME_BLOCKED_CARRIER:
+        return "blocked_carrier";
+    }
+
+    return "blocked_unknown";
+}
+
+static enum rwnx_conn_tx_resume_result
+rwnx_conn_tx_resume(struct rwnx_vif *rwnx_vif)
 {
     struct net_device *dev = rwnx_vif->ndev;
+    struct rwnx_runtime_stats *stats = &rwnx_vif->rwnx_hw->runtime_stats;
+    enum rwnx_conn_tx_resume_result result;
 
     if (!atomic_xchg(&rwnx_vif->conn_tx_paused, 0))
-        return false;
-    if (!dev || !rwnx_vif->up || !netif_carrier_ok(dev))
-        return false;
+        return RWNX_CONN_TX_RESUME_NOT_PAUSED;
+    if (!dev || !rwnx_vif->up) {
+        result = RWNX_CONN_TX_RESUME_BLOCKED_VIF;
+        goto note_result;
+    }
+    if (!netif_carrier_ok(dev)) {
+        result = RWNX_CONN_TX_RESUME_BLOCKED_CARRIER;
+        goto note_result;
+    }
 
 #ifdef AICWF_USB_SUPPORT
-    return aicwf_usb_tx_maybe_wake(rwnx_vif->rwnx_hw, dev);
+    switch (aicwf_usb_tx_maybe_wake(rwnx_vif->rwnx_hw, dev)) {
+    case AICWF_USB_TX_WAKE_IMMEDIATE:
+        result = RWNX_CONN_TX_RESUME_IMMEDIATE;
+        break;
+    case AICWF_USB_TX_WAKE_DEFERRED_TBUSY:
+        result = RWNX_CONN_TX_RESUME_DEFERRED_TBUSY;
+        break;
+    case AICWF_USB_TX_WAKE_BLOCKED_BUS_DOWN:
+        result = RWNX_CONN_TX_RESUME_BLOCKED_BUS_DOWN;
+        break;
+    case AICWF_USB_TX_WAKE_BLOCKED_USB_DOWN:
+        result = RWNX_CONN_TX_RESUME_BLOCKED_USB_DOWN;
+        break;
+    case AICWF_USB_TX_WAKE_BLOCKED_CARRIER:
+        result = RWNX_CONN_TX_RESUME_BLOCKED_CARRIER;
+        break;
+    case AICWF_USB_TX_WAKE_BLOCKED_NO_DEVICE:
+    default:
+        result = RWNX_CONN_TX_RESUME_BLOCKED_NO_DEVICE;
+        break;
+    }
 #else
     netif_tx_wake_all_queues(dev);
-    return true;
+    result = RWNX_CONN_TX_RESUME_IMMEDIATE;
 #endif
+
+note_result:
+    if (result == RWNX_CONN_TX_RESUME_IMMEDIATE)
+        atomic_inc(&stats->roam_tx_resume_immediate);
+    else if (result == RWNX_CONN_TX_RESUME_DEFERRED_TBUSY)
+        atomic_inc(&stats->roam_tx_resume_deferred_tbusy);
+    else
+        atomic_inc(&stats->roam_tx_resume_blocked);
+    return result;
 }
 
 int rwnx_conn_track_start(struct rwnx_vif *rwnx_vif,
@@ -1156,8 +1260,8 @@ int rwnx_conn_track_start(struct rwnx_vif *rwnx_vif,
     struct rwnx_conn_txn *txn = &rwnx_vif->conn_txn;
     unsigned long flags;
     u32 txn_id;
-    u8 log_target[ETH_ALEN] = {0};
-    u8 log_prev[ETH_ALEN] = {0};
+    bool log_target_valid;
+    bool log_prev_valid;
     u8 log_old_ap;
 
     if (kind != RWNX_CONN_TXN_INITIAL &&
@@ -1192,8 +1296,8 @@ int rwnx_conn_track_start(struct rwnx_vif *rwnx_vif,
         txn->late_disconnect_deadline = 0;
         txn->late_disconnect_txn_id = 0;
     }
-    memcpy(log_target, txn->target_bssid, ETH_ALEN);
-    memcpy(log_prev, txn->prev_bssid, ETH_ALEN);
+    log_target_valid = txn->target_valid;
+    log_prev_valid = txn->prev_valid;
     log_old_ap = txn->old_ap_idx;
     atomic_set(&rwnx_vif->drv_conn_state, RWNX_DRV_STATUS_CONNECTING);
     spin_unlock_irqrestore(&txn->lock, flags);
@@ -1201,9 +1305,9 @@ int rwnx_conn_track_start(struct rwnx_vif *rwnx_vif,
     mod_delayed_work(system_wq, &txn->timeout_work,
                      msecs_to_jiffies(RWNX_CONNECT_IND_MAX_AGE_MS));
     AICWFDBG(LOGINFO,
-             "conn_txn_begin id:%u vif:%u kind:%u prev:%pM target:%pM old_ap:%u state:%d carrier:%d\r\n",
+             "conn_txn_begin id:%u vif:%u kind:%u prev_set:%d target_set:%d old_ap:%u state:%d carrier:%d\r\n",
              txn_id, rwnx_vif->vif_index, kind,
-             log_prev, log_target, log_old_ap,
+             log_prev_valid, log_target_valid, log_old_ap,
              atomic_read(&rwnx_vif->drv_conn_state),
              rwnx_vif->ndev ? netif_carrier_ok(rwnx_vif->ndev) : 0);
     return 0;
@@ -1287,7 +1391,6 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
     struct net_device *dev;
     const u8 *req_ie;
     const u8 *rsp_ie;
-    const u8 *log_target;
     const u8 *extcap_ie;
     const struct ieee_types_extcap *extcap;
     struct ieee80211_channel *chan = NULL;
@@ -1307,7 +1410,8 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
     bool target_mismatch = false;
     bool malformed_success = false;
     bool arm_late_disconnect = false;
-    bool tx_resumed = false;
+    enum rwnx_conn_tx_resume_result tx_resume =
+        RWNX_CONN_TX_RESUME_NOT_PAUSED;
     u8 prev_bssid[ETH_ALEN] = {0};
     u8 txq_status;
     unsigned long pause_ms = 0;
@@ -1334,8 +1438,6 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
         memcpy(prev_bssid, rwnx_vif->sta.ap->mac_addr, ETH_ALEN);
 
     transaction_active = rwnx_conn_track_snapshot(rwnx_vif, &txn);
-    log_target = transaction_active ? txn.target_bssid :
-                 (const u8 *)ind->bssid.array;
     if (transaction_active) {
         age_ms = jiffies_to_msecs(jiffies - txn.start_jiffies);
         if (!had_sta_ap && txn.prev_valid)
@@ -1361,9 +1463,9 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
             rwnx_conn_guard_note(had_sta_ap ? RWNX_GUARD_DUP_CONNECTED :
                                              RWNX_GUARD_SUPPRESS_PREV_STATE);
             AICWFDBG(LOGINFO,
-                     "conn_ind evt:%u vif:%u decision:drop_no_txn status:%u raw_roamed:%u state:%d had_ap:%d bssid:%pM\r\n",
+                     "conn_ind evt:%u vif:%u decision:drop_no_txn status:%u raw_roamed:%u state:%d had_ap:%d\r\n",
                      evt_id, ind->vif_idx, ind->status_code, roamed_raw,
-                     prev_state, had_sta_ap, ind->bssid.array);
+                     prev_state, had_sta_ap);
             return 0;
         }
     } else if (transaction_active && roam && roamed_raw != 1 &&
@@ -1415,14 +1517,17 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
     }
 
     AICWFDBG(LOGINFO,
-             "conn_ind evt:%u txn:%u vif:%u kind:%u phase:%u status:%u raw_roamed:%u roam:%d synth:%d age_ms:%lu state:%d had_ap:%d prev:%pM target:%pM new:%pM stale:%d mismatch:%d malformed:%d\r\n",
+             "conn_ind evt:%u txn:%u vif:%u kind:%u phase:%u status:%u raw_roamed:%u roam:%d synth:%d age_ms:%lu state:%d had_ap:%d prev_set:%d target_set:%d bssid_changed:%d stale:%d mismatch:%d malformed:%d\r\n",
              evt_id, transaction_active ? txn.id : 0, ind->vif_idx,
              transaction_active ? txn.kind : RWNX_CONN_TXN_NONE,
              transaction_active ? txn.phase : RWNX_CONN_TXN_IDLE,
              ind->status_code, roamed_raw, roam, synthesized_roam, age_ms,
-             prev_state, had_sta_ap, prev_bssid,
-             log_target,
-             ind->bssid.array, stale, target_mismatch, malformed_success);
+             prev_state, had_sta_ap,
+             had_sta_ap || (transaction_active && txn.prev_valid),
+             transaction_active ? txn.target_valid :
+                 !is_zero_ether_addr((const u8 *)ind->bssid.array),
+             had_sta_ap && memcmp(prev_bssid, ind->bssid.array, ETH_ALEN),
+             stale, target_mismatch, malformed_success);
 
     if (ind->status_code != 0 || stale || target_mismatch ||
         malformed_success) {
@@ -1613,19 +1718,20 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
             pause_ms = jiffies_to_msecs(
                 jiffies - txn.old_link_gone_jiffies);
         }
-        tx_resumed = rwnx_conn_tx_resume(rwnx_vif);
+        tx_resume = rwnx_conn_tx_resume(rwnx_vif);
     } else {
         netif_tx_start_all_queues(dev);
         netif_carrier_on(dev);
     }
     AICWFDBG(LOGINFO,
-             "conn_txn_end id:%u evt:%u vif:%u kind:%u phase:%u report:%s status:success duration_ms:%lu pause_ms:%lu tx_resumed:%d old:%pM new:%pM late_guard:%d state:%d carrier:%d\r\n",
+             "conn_txn_end id:%u evt:%u vif:%u kind:%u phase:%u report:%s status:success duration_ms:%lu pause_ms:%lu tx_resume:%s bssid_changed:%d late_guard:%d state:%d carrier:%d\r\n",
              transaction_active ? txn.id : 0, evt_id, ind->vif_idx,
              roam ? RWNX_CONN_TXN_ROAM : RWNX_CONN_TXN_INITIAL,
              transaction_active ? txn.phase : RWNX_CONN_TXN_IDLE,
              roam ? "roamed" : "connect_result", age_ms, pause_ms,
-             tx_resumed,
-             prev_bssid, ind->bssid.array, arm_late_disconnect,
+             rwnx_conn_tx_resume_name(tx_resume),
+             had_sta_ap && memcmp(prev_bssid, ind->bssid.array, ETH_ALEN),
+             arm_late_disconnect,
              atomic_read(&rwnx_vif->drv_conn_state),
              netif_carrier_ok(dev));
     return 0;
@@ -1794,6 +1900,7 @@ static inline int rwnx_rx_sm_disconnect_ind(struct rwnx_hw *rwnx_hw,
                      netif_carrier_ok(dev));
             return 0;
         }
+        atomic_inc(&rwnx_hw->runtime_stats.roam_tx_pauses);
         netif_tx_stop_all_queues(dev);
         rwnx_conn_cleanup_link(rwnx_hw, rwnx_vif, true);
         atomic_set(&rwnx_vif->drv_conn_state,

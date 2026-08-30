@@ -49,6 +49,11 @@ module_param(busrx_thread_prio, int, 0);
 
 atomic_t rx_urb_cnt;
 
+#define AICWF_USB_STAT_INC(usb_dev, field) do { \
+    if ((usb_dev) && (usb_dev)->rwnx_hw) \
+        atomic_inc(&(usb_dev)->rwnx_hw->runtime_stats.field); \
+} while (0)
+
 void aicwf_usb_tx_flowctrl(struct rwnx_hw *rwnx_hw, bool state)
 {
     struct rwnx_vif *rwnx_vif;
@@ -65,31 +70,37 @@ void aicwf_usb_tx_flowctrl(struct rwnx_hw *rwnx_hw, bool state)
 	}
 }
 
-bool aicwf_usb_tx_maybe_wake(struct rwnx_hw *rwnx_hw,
-                             struct net_device *ndev)
+enum aicwf_usb_tx_wake_result
+aicwf_usb_tx_maybe_wake(struct rwnx_hw *rwnx_hw,
+                        struct net_device *ndev)
 {
     struct aic_usb_dev *usb_dev;
     unsigned long flags;
-    bool woke = false;
+    enum aicwf_usb_tx_wake_result result;
 
     if (!rwnx_hw || !ndev)
-        return false;
+        return AICWF_USB_TX_WAKE_BLOCKED_NO_DEVICE;
 
     usb_dev = rwnx_hw->usbdev;
     if (!usb_dev || !usb_dev->bus_if)
-        return false;
+        return AICWF_USB_TX_WAKE_BLOCKED_NO_DEVICE;
 
     spin_lock_irqsave(&usb_dev->tx_flow_lock, flags);
-    if (!usb_dev->tbusy &&
-        usb_dev->bus_if->state != BUS_DOWN_ST &&
-        usb_dev->state != USB_DOWN_ST &&
-        netif_carrier_ok(ndev)) {
+    if (usb_dev->bus_if->state == BUS_DOWN_ST) {
+        result = AICWF_USB_TX_WAKE_BLOCKED_BUS_DOWN;
+    } else if (usb_dev->state == USB_DOWN_ST) {
+        result = AICWF_USB_TX_WAKE_BLOCKED_USB_DOWN;
+    } else if (!netif_carrier_ok(ndev)) {
+        result = AICWF_USB_TX_WAKE_BLOCKED_CARRIER;
+    } else if (usb_dev->tbusy) {
+        result = AICWF_USB_TX_WAKE_DEFERRED_TBUSY;
+    } else {
         netif_tx_wake_all_queues(ndev);
-        woke = true;
+        result = AICWF_USB_TX_WAKE_IMMEDIATE;
     }
     spin_unlock_irqrestore(&usb_dev->tx_flow_lock, flags);
 
-    return woke;
+    return result;
 }
 
 static struct aicwf_usb_buf *aicwf_usb_tx_dequeue(struct aic_usb_dev *usb_dev,
@@ -273,6 +284,7 @@ static void aicwf_usb_tx_complete(struct urb *urb)
     if (usb_dev->tx_free_count > AICWF_USB_TX_HIGH_WATER) {
         if (usb_dev->tbusy) {
             usb_dev->tbusy = false;
+            AICWF_USB_STAT_INC(usb_dev, usb_flow_wakes);
             aicwf_usb_tx_flowctrl(usb_dev->rwnx_hw, false);
         }
     }
@@ -343,7 +355,9 @@ static void aicwf_usb_rx_complete(struct urb *urb)
 
         if(!aicwf_rxbuff_enqueue(usb_dev->dev, &rx_priv->rxq, rx_buff)){
             spin_unlock_irqrestore(&rx_priv->rxqlock, flags);
-            usb_err("rx_priv->rxq is over flow!!!\n");
+            AICWF_USB_STAT_INC(usb_dev, usb_rx_queue_overflows);
+            AICWFDBG_RATELIMITED(LOGERROR,
+                                 "USB RX queue overflow\n");
             aicwf_prealloc_rxbuff_free(rx_buff, &rx_priv->rxbuff_lock);
             aicwf_usb_rx_buf_put(usb_dev, usb_buf);
             aicwf_usb_rx_submit_all_urb_(usb_dev);
@@ -436,7 +450,9 @@ static void aicwf_usb_rx_complete(struct urb *urb)
         #endif
         if(!aicwf_rxframe_enqueue(usb_dev->dev, &rx_priv->rxq, skb)){
             spin_unlock_irqrestore(&rx_priv->rxqlock, flags);
-            usb_err("rx_priv->rxq is over flow!!!\n");
+            AICWF_USB_STAT_INC(usb_dev, usb_rx_queue_overflows);
+            AICWFDBG_RATELIMITED(LOGERROR,
+                                 "USB RX queue overflow\n");
             aicwf_dev_skb_free(skb);
             aicwf_usb_rx_buf_put(usb_dev, usb_buf);
             aicwf_usb_rx_submit_all_urb_(usb_dev);
@@ -506,7 +522,9 @@ static void aicwf_usb_msg_rx_complete(struct urb *urb)
         spin_lock_irqsave(&rx_priv->msg_rxqlock, flags);
         if(!aicwf_rxframe_enqueue(usb_dev->dev, &rx_priv->msg_rxq, skb)){
             spin_unlock_irqrestore(&rx_priv->msg_rxqlock, flags);
-            usb_err("rx_priv->rxq is over flow!!!\n");
+            AICWF_USB_STAT_INC(usb_dev, usb_rx_queue_overflows);
+            AICWFDBG_RATELIMITED(LOGERROR,
+                                 "USB message RX queue overflow\n");
             aicwf_dev_skb_free(skb);
             return;
         }
@@ -535,7 +553,10 @@ static int aicwf_usb_submit_rx_urb(struct aic_usb_dev *usb_dev,
         return -1;
 
     if (usb_dev->state != USB_UP_ST) {
-        usb_err("usb state is not up!\r\n");
+        AICWF_USB_STAT_INC(usb_dev, usb_rx_state_rejects);
+        AICWFDBG_RATELIMITED(LOGERROR,
+                             "USB RX rejected in state:%d\n",
+                             usb_dev->state);
         aicwf_usb_rx_buf_put(usb_dev, usb_buf);
         return -1;
     }
@@ -562,7 +583,9 @@ static int aicwf_usb_submit_rx_urb(struct aic_usb_dev *usb_dev,
     usb_anchor_urb(usb_buf->urb, &usb_dev->rx_submitted);
     ret = usb_submit_urb(usb_buf->urb, GFP_ATOMIC);
     if (ret) {
-        usb_err("usb submit rx urb fail:%d\n", ret);
+        AICWF_USB_STAT_INC(usb_dev, usb_rx_submit_failures);
+        AICWFDBG_RATELIMITED(LOGERROR,
+                             "USB RX submit failed:%d\n", ret);
         usb_unanchor_urb(usb_buf->urb);
         aicwf_prealloc_rxbuff_free(rx_buff, &usb_dev->rx_priv->rxbuff_lock);
         aicwf_usb_rx_buf_put(usb_dev, usb_buf);
@@ -585,7 +608,10 @@ static int aicwf_usb_submit_rx_urb(struct aic_usb_dev *usb_dev,
         return -1;
 
     if (usb_dev->state != USB_UP_ST) {
-        usb_err("usb state is not up!\n");
+        AICWF_USB_STAT_INC(usb_dev, usb_rx_state_rejects);
+        AICWFDBG_RATELIMITED(LOGERROR,
+                             "USB RX rejected in state:%d\n",
+                             usb_dev->state);
         aicwf_usb_rx_buf_put(usb_dev, usb_buf);
         return -1;
     }
@@ -608,7 +634,9 @@ static int aicwf_usb_submit_rx_urb(struct aic_usb_dev *usb_dev,
     usb_anchor_urb(usb_buf->urb, &usb_dev->rx_submitted);
     ret = usb_submit_urb(usb_buf->urb, GFP_ATOMIC);
     if (ret) {
-        usb_err("usb submit rx urb fail:%d\n", ret);
+        AICWF_USB_STAT_INC(usb_dev, usb_rx_submit_failures);
+        AICWFDBG_RATELIMITED(LOGERROR,
+                             "USB RX submit failed:%d\n", ret);
         usb_unanchor_urb(usb_buf->urb);
         aicwf_dev_skb_free(usb_buf->skb);
         usb_buf->skb = NULL;
@@ -628,13 +656,18 @@ static void aicwf_usb_rx_submit_all_urb(struct aic_usb_dev *usb_dev)
 //	int i = 0;
 
     if (usb_dev->state != USB_UP_ST) {
-        AICWFDBG(LOGERROR, "bus is not up=%d\n", usb_dev->state);
+        AICWF_USB_STAT_INC(usb_dev, usb_rx_state_rejects);
+        AICWFDBG_RATELIMITED(LOGERROR,
+                             "USB RX refill rejected in state:%d\n",
+                             usb_dev->state);
         return;
     }
 
     while((usb_buf = aicwf_usb_rx_buf_get(usb_dev)) != NULL) {
         if (aicwf_usb_submit_rx_urb(usb_dev, usb_buf)) {
-            AICWFDBG(LOGERROR, "usb rx refill fail\n");
+            AICWF_USB_STAT_INC(usb_dev, usb_rx_refill_failures);
+            AICWFDBG_RATELIMITED(LOGERROR,
+                                 "USB RX refill failed\n");
             if (usb_dev->state != USB_UP_ST)
                 return;
         }
@@ -652,7 +685,10 @@ static int aicwf_usb_submit_msg_rx_urb(struct aic_usb_dev *usb_dev,
         return -1;
 
     if (usb_dev->state != USB_UP_ST) {
-        AICWFDBG(LOGERROR, "usb state is not up!\n");
+        AICWF_USB_STAT_INC(usb_dev, usb_rx_state_rejects);
+        AICWFDBG_RATELIMITED(LOGERROR,
+                             "USB message RX rejected in state:%d\n",
+                             usb_dev->state);
         aicwf_usb_msg_rx_buf_put(usb_dev, usb_buf);
         return -1;
     }
@@ -675,7 +711,9 @@ static int aicwf_usb_submit_msg_rx_urb(struct aic_usb_dev *usb_dev,
     usb_anchor_urb(usb_buf->urb, &usb_dev->msg_rx_submitted);
     ret = usb_submit_urb(usb_buf->urb, GFP_ATOMIC);
     if (ret) {
-        AICWFDBG(LOGERROR, "usb submit msg rx urb fail:%d\n", ret);
+        AICWF_USB_STAT_INC(usb_dev, usb_rx_submit_failures);
+        AICWFDBG_RATELIMITED(LOGERROR,
+                             "USB message RX submit failed:%d\n", ret);
         usb_unanchor_urb(usb_buf->urb);
         aicwf_dev_skb_free(usb_buf->skb);
         usb_buf->skb = NULL;
@@ -692,13 +730,18 @@ static void aicwf_usb_msg_rx_submit_all_urb(struct aic_usb_dev *usb_dev)
     struct aicwf_usb_buf *usb_buf;
 
     if (usb_dev->state != USB_UP_ST) {
-        AICWFDBG(LOGERROR, "bus is not up=%d\n", usb_dev->state);
+        AICWF_USB_STAT_INC(usb_dev, usb_rx_state_rejects);
+        AICWFDBG_RATELIMITED(LOGERROR,
+                             "USB message RX refill rejected in state:%d\n",
+                             usb_dev->state);
         return;
     }
 
     while((usb_buf = aicwf_usb_msg_rx_buf_get(usb_dev)) != NULL) {
         if (aicwf_usb_submit_msg_rx_urb(usb_dev, usb_buf)) {
-            AICWFDBG(LOGERROR, "usb msg rx refill fail\n");
+            AICWF_USB_STAT_INC(usb_dev, usb_rx_refill_failures);
+            AICWFDBG_RATELIMITED(LOGERROR,
+                                 "USB message RX refill failed\n");
             if (usb_dev->state != USB_UP_ST)
                 return;
         }
@@ -757,14 +800,21 @@ int aicwf_usb_send_pkt(struct aic_usb_dev *usb_dev, u8 *buf, uint buf_len)
     bool need_cfm = false;
 
     if (usb_dev->state != USB_UP_ST) {
-        AICWFDBG(LOGERROR, "usb state is not up!\n");
+        AICWF_USB_STAT_INC(usb_dev, usb_tx_state_rejects);
+        AICWFDBG_RATELIMITED(LOGERROR,
+                             "USB TX rejected in state:%d\n",
+                             usb_dev->state);
         return -EIO;
     }
 
     usb_buf = aicwf_usb_tx_dequeue(usb_dev, &usb_dev->tx_free_list,
                         &usb_dev->tx_free_count, &usb_dev->tx_free_lock);
     if (!usb_buf) {
-        AICWFDBG(LOGERROR, "free:%d, post:%d\n", usb_dev->tx_free_count, usb_dev->tx_post_count);
+        AICWF_USB_STAT_INC(usb_dev, usb_tx_no_buffers);
+        AICWFDBG_RATELIMITED(LOGERROR,
+                             "USB TX buffer exhausted free:%d post:%d\n",
+                             usb_dev->tx_free_count,
+                             usb_dev->tx_post_count);
         ret = -ENOMEM;
         goto flow_ctrl;
     }
@@ -775,8 +825,10 @@ int aicwf_usb_send_pkt(struct aic_usb_dev *usb_dev, u8 *buf, uint buf_len)
         usb_buf->cfm = true;
     else
         usb_buf->cfm = false;
-    AICWFDBG(LOGERROR, "%s len %d\n", __func__, buf_len);
-    print_hex_dump(KERN_ERR, "buf  ", DUMP_PREFIX_NONE, 16, 1, &buf[0], 32, false);
+    AICWFDBG(LOGDEBUG, "%s len:%d\n", __func__, buf_len);
+    if (READ_ONCE(aicwf_dbg_level) & LOGDATA)
+        print_hex_dump(KERN_DEBUG, "aic8800 tx: ", DUMP_PREFIX_NONE,
+                       16, 1, &buf[0], min_t(uint, buf_len, 32), false);
     usb_fill_bulk_urb(usb_buf->urb, usb_dev->udev, usb_dev->bulk_out_pipe,
                 buf, buf_len, aicwf_usb_tx_complete, usb_buf);
     usb_buf->urb->transfer_flags |= URB_ZERO_PACKET;
@@ -788,6 +840,8 @@ int aicwf_usb_send_pkt(struct aic_usb_dev *usb_dev, u8 *buf, uint buf_len)
     flow_ctrl:
     spin_lock_irqsave(&usb_dev->tx_flow_lock, flags);
     if (usb_dev->tx_free_count < AICWF_USB_TX_LOW_WATER) {
+        if (!usb_dev->tbusy)
+            AICWF_USB_STAT_INC(usb_dev, usb_flow_stops);
         usb_dev->tbusy = true;
         aicwf_usb_tx_flowctrl(usb_dev->rwnx_hw, true);
     }
@@ -855,19 +909,26 @@ int aicwf_usb_send(struct aicwf_tx_priv *tx_priv)
 
     if (aicwf_is_framequeue_empty(&tx_priv->txq)) {
         ret = -1;
-        AICWFDBG(LOGERROR, "no buf to send\n");
+        AICWFDBG_RATELIMITED(LOGDEBUG, "USB TX queue is empty\n");
         return ret;
     }
 
     if (usbdev->state != USB_UP_ST) {
-        AICWFDBG(LOGERROR, "usb state is not up!\n");
+        AICWF_USB_STAT_INC(usbdev, usb_tx_state_rejects);
+        AICWFDBG_RATELIMITED(LOGERROR,
+                             "USB TX rejected in state:%d\n",
+                             usbdev->state);
         ret = -ENODEV;
         return ret;
     }
     usb_buf = aicwf_usb_tx_dequeue(usbdev, &usbdev->tx_free_list,
                         &usbdev->tx_free_count, &usbdev->tx_free_lock);
     if (!usb_buf) {
-        AICWFDBG(LOGERROR, "free:%d, post:%d\n", usbdev->tx_free_count, usbdev->tx_post_count);
+        AICWF_USB_STAT_INC(usbdev, usb_tx_no_buffers);
+        AICWFDBG_RATELIMITED(LOGERROR,
+                             "USB TX buffer exhausted free:%d post:%d\n",
+                             usbdev->tx_free_count,
+                             usbdev->tx_post_count);
         ret = -ENOMEM;
         return ret;
     }
@@ -879,7 +940,10 @@ int aicwf_usb_send(struct aicwf_tx_priv *tx_priv)
 
     while (!aicwf_is_framequeue_empty(&usbdev->tx_priv->txq)) {
         if (usbdev->state != USB_UP_ST) {
-            AICWFDBG(LOGERROR, "usb state is not up, break!\n");
+            AICWF_USB_STAT_INC(usbdev, usb_tx_state_rejects);
+            AICWFDBG_RATELIMITED(LOGERROR,
+                                 "USB aggregate TX stopped in state:%d\n",
+                                 usbdev->state);
             ret = -ENODEV;
             break;
         }
@@ -890,7 +954,8 @@ int aicwf_usb_send(struct aicwf_tx_priv *tx_priv)
         spin_lock_bh(&usbdev->tx_priv->txqlock);
         pkt = aicwf_frame_dequeue(&usbdev->tx_priv->txq);
         if (pkt == NULL) {
-            AICWFDBG(LOGERROR, "txq no pkt\n");
+            AICWFDBG_RATELIMITED(LOGDEBUG,
+                                 "USB aggregate TX queue drained\n");
             spin_unlock_bh(&usbdev->tx_priv->txqlock);
             ret = -1;
             return ret;
@@ -909,7 +974,8 @@ int aicwf_usb_send(struct aicwf_tx_priv *tx_priv)
 
     curr_len = tx_priv->tail - tx_priv->head;
 
-    AICWFDBG(LOGERROR, "%s len %d, cnt %d\n", __func__,curr_len, usb_buf->aggr_cnt);
+    AICWFDBG(LOGDEBUG, "%s len:%d count:%d\n",
+             __func__, curr_len, usb_buf->aggr_cnt);
     tx_buf->len = tx_priv->tail - tx_priv->head;
     spin_unlock_bh(&usbdev->tx_priv->txdlock);
     usb_fill_bulk_urb(usb_buf->urb, usbdev->udev, usbdev->bulk_out_pipe,
@@ -941,7 +1007,8 @@ static void aicwf_usb_tx_process(struct aic_usb_dev *usb_dev)
 #ifdef CONFIG_USB_TX_AGGR
     if (!aicwf_is_framequeue_empty(&usb_dev->tx_priv->txq)) {
         if (aicwf_usb_send(usb_dev->tx_priv)) {
-            AICWFDBG(LOGERROR, "%s no buf send\n", __func__);
+            AICWFDBG_RATELIMITED(LOGDEBUG,
+                                 "%s deferred aggregate TX\n", __func__);
         }
     }
 #endif
@@ -949,7 +1016,10 @@ static void aicwf_usb_tx_process(struct aic_usb_dev *usb_dev)
     while(!list_empty(&usb_dev->tx_post_list)) {
 
         if (usb_dev->state != USB_UP_ST) {
-            usb_err("usb state is not up!\n");
+            AICWF_USB_STAT_INC(usb_dev, usb_tx_state_rejects);
+            AICWFDBG_RATELIMITED(LOGERROR,
+                                 "USB TX process stopped in state:%d\n",
+                                 usb_dev->state);
             return;
         }
 
@@ -963,7 +1033,9 @@ static void aicwf_usb_tx_process(struct aic_usb_dev *usb_dev)
 
         ret = usb_submit_urb(usb_buf->urb, GFP_ATOMIC);
         if (ret) {
-            AICWFDBG(LOGERROR, "aicwf_usb_bus_tx usb_submit_urb FAILED err:%d\n", ret);
+            AICWF_USB_STAT_INC(usb_dev, usb_tx_submit_failures);
+            AICWFDBG_RATELIMITED(LOGERROR,
+                                 "USB TX submit failed:%d\n", ret);
             #ifdef CONFIG_USB_TX_AGGR
             aicwf_usb_tx_queue(usb_dev, &usb_dev->tx_post_list, usb_buf,
                     &usb_dev->tx_post_count, &usb_dev->tx_post_lock);
@@ -1447,7 +1519,10 @@ static int aicwf_usb_bus_txdata(struct device *dev, struct sk_buff *skb)
 #endif
 
     if (usb_dev->state != USB_UP_ST) {
-        usb_err("usb state is not up!\n");
+        AICWF_USB_STAT_INC(usb_dev, usb_tx_state_rejects);
+        AICWFDBG_RATELIMITED(LOGERROR,
+                             "USB TX rejected in state:%d\n",
+                             usb_dev->state);
         kmem_cache_free(rwnx_hw->sw_txhdr_cache, txhdr->sw_hdr);
         dev_kfree_skb_any(skb);
         return -EIO;
@@ -1456,7 +1531,11 @@ static int aicwf_usb_bus_txdata(struct device *dev, struct sk_buff *skb)
     usb_buf = aicwf_usb_tx_dequeue(usb_dev, &usb_dev->tx_free_list,
                         &usb_dev->tx_free_count, &usb_dev->tx_free_lock);
     if (!usb_buf) {
-        usb_err("free:%d, post:%d\n", usb_dev->tx_free_count, usb_dev->tx_post_count);
+        AICWF_USB_STAT_INC(usb_dev, usb_tx_no_buffers);
+        AICWFDBG_RATELIMITED(LOGERROR,
+                             "USB TX buffer exhausted free:%d post:%d\n",
+                             usb_dev->tx_free_count,
+                             usb_dev->tx_post_count);
         kmem_cache_free(rwnx_hw->sw_txhdr_cache, txhdr->sw_hdr);
         dev_kfree_skb_any(skb);
         ret = -ENOMEM;
@@ -1521,7 +1600,8 @@ static int aicwf_usb_bus_txdata(struct device *dev, struct sk_buff *skb)
 
 #ifndef CONFIG_USE_USB_ZERO_PACKET
 	if((buf_len % 512) == 0){
-		printk("%s send zero package buf_len: %d\r\n", __func__, buf_len);
+		AICWFDBG(LOGDEBUG, "%s append zero-packet byte len:%d\r\n",
+		         __func__, buf_len);
 		if(txhdr->sw_hdr->need_cfm){
 			buf[buf_len] = 0x00;
 			buf_len = buf_len + 1;
@@ -1574,6 +1654,8 @@ static int aicwf_usb_bus_txdata(struct device *dev, struct sk_buff *skb)
     if (usb_dev->tx_free_count < AICWF_USB_TX_LOW_WATER) {
 		AICWFDBG(LOGDEBUG, "usb_dev->tx_free_count < AICWF_USB_TX_LOW_WATER:%d\r\n",
 			usb_dev->tx_free_count);
+        if (!usb_dev->tbusy)
+            AICWF_USB_STAT_INC(usb_dev, usb_flow_stops);
         usb_dev->tbusy = true;
         aicwf_usb_tx_flowctrl(usb_dev->rwnx_hw, true);
     }
@@ -1830,13 +1912,14 @@ static int aicwf_parse_usb(struct aic_usb_dev *usb_dev, struct usb_interface *in
 #else
     if (usb->actconfig->desc.bNumInterfaces != 1) {
 #endif
-	   AICWFDBG(LOGERROR, "Number of interfaces: %d not supported\n",
-            usb->actconfig->desc.bNumInterfaces);
+		AICWFDBG(LOGINFO,
+		         "USB interface layout count:%d selecting compatible chip mode\n",
+		         usb->actconfig->desc.bNumInterfaces);
 		if(usb_dev->chipid == PRODUCT_ID_AIC8800DC){
-			AICWFDBG(LOGERROR, "AIC8800DC change to AIC8800DW\n");
+			AICWFDBG(LOGINFO, "AIC8800DC compatible mode: AIC8800DW\n");
 			usb_dev->chipid = PRODUCT_ID_AIC8800DW;
         }else if (usb_dev->chipid == PRODUCT_ID_AIC8800DW) {
-            printk("8800dw\n");
+			AICWFDBG(LOGDEBUG, "AIC8800DW interface layout confirmed\n");
 		}
     }
 

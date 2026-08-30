@@ -642,6 +642,22 @@ struct sta_tx_flowctrl {
     u8 flowctrl;
 };
 
+struct rwnx_runtime_stats {
+    atomic_t roam_tx_pauses;
+    atomic_t roam_tx_resume_immediate;
+    atomic_t roam_tx_resume_deferred_tbusy;
+    atomic_t roam_tx_resume_blocked;
+    atomic_t usb_rx_submit_failures;
+    atomic_t usb_rx_refill_failures;
+    atomic_t usb_rx_state_rejects;
+    atomic_t usb_rx_queue_overflows;
+    atomic_t usb_tx_submit_failures;
+    atomic_t usb_tx_no_buffers;
+    atomic_t usb_tx_state_rejects;
+    atomic_t usb_flow_stops;
+    atomic_t usb_flow_wakes;
+};
+
 struct rwnx_hw {
     struct rwnx_mod_params *mod_params;
     struct device *dev;
@@ -706,6 +722,7 @@ struct rwnx_hw {
 
     struct rwnx_debugfs     debugfs;
     struct rwnx_stats       stats;
+    struct rwnx_runtime_stats runtime_stats;
 
 #ifdef CONFIG_PREALLOC_TXQ
     struct rwnx_txq *txq;
