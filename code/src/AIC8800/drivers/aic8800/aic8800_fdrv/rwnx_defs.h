@@ -340,6 +340,7 @@ struct rwnx_conn_txn {
     enum rwnx_conn_txn_kind kind;
     enum rwnx_conn_txn_phase phase;
     unsigned long start_jiffies;
+    unsigned long old_link_gone_jiffies;
     bool target_valid;
     bool prev_valid;
     bool late_disconnect_pending;
@@ -363,6 +364,7 @@ struct rwnx_vif {
     struct net_device_stats net_stats;
     struct rwnx_key key[6];
     atomic_t drv_conn_state;
+    atomic_t conn_tx_paused;
     struct rwnx_conn_txn conn_txn;
     u8 drv_vif_index;           /* Identifier of the VIF in driver */
     u8 vif_index;               /* Identifier of the station in FW */

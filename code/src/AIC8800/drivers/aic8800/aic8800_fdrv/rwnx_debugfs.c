@@ -1781,8 +1781,9 @@ static ssize_t rwnx_dbgfs_rc_fixed_rate_idx_write(struct file *file,
     if (copy_from_user(buf, user_buf, len))
         return -EFAULT;
     buf[len] = '\0';
-    if (sscanf(buf, "%u %u %u %u %u", &formatmod, &mcs, &nss, &bwTx, &gi) != 5)
+    if (sscanf(buf, "%u %u %u %u %u", &formatmod, &mcs, &nss, &bwTx, &gi) != 5) {
         return -EINVAL;
+    }
 
 	if (bwTx > 3 || gi > 3 || nss > 7)
 		return -EINVAL;

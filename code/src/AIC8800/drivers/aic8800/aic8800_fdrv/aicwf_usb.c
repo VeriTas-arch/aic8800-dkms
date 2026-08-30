@@ -12,6 +12,7 @@
 #include "aicwf_usb.h"
 #include "rwnx_tx.h"
 #include "rwnx_defs.h"
+#include "rwnx_msg_rx.h"
 #include "usb_host.h"
 #include "rwnx_platform.h"
 
@@ -55,11 +56,40 @@ void aicwf_usb_tx_flowctrl(struct rwnx_hw *rwnx_hw, bool state)
     list_for_each_entry(rwnx_vif, &rwnx_hw->vifs, list) {
         if (!rwnx_vif || !rwnx_vif->ndev || !rwnx_vif->up)
             continue;
-        if (state)
+        if (state) {
             netif_tx_stop_all_queues(rwnx_vif->ndev);//netif_stop_queue(rwnx_vif->ndev);
-        else
+        } else if (netif_carrier_ok(rwnx_vif->ndev) &&
+                   !rwnx_conn_tx_paused(rwnx_vif)) {
             netif_tx_wake_all_queues(rwnx_vif->ndev);//netif_wake_queue(rwnx_vif->ndev);
+		}
 	}
+}
+
+bool aicwf_usb_tx_maybe_wake(struct rwnx_hw *rwnx_hw,
+                             struct net_device *ndev)
+{
+    struct aic_usb_dev *usb_dev;
+    unsigned long flags;
+    bool woke = false;
+
+    if (!rwnx_hw || !ndev)
+        return false;
+
+    usb_dev = rwnx_hw->usbdev;
+    if (!usb_dev || !usb_dev->bus_if)
+        return false;
+
+    spin_lock_irqsave(&usb_dev->tx_flow_lock, flags);
+    if (!usb_dev->tbusy &&
+        usb_dev->bus_if->state != BUS_DOWN_ST &&
+        usb_dev->state != USB_DOWN_ST &&
+        netif_carrier_ok(ndev)) {
+        netif_tx_wake_all_queues(ndev);
+        woke = true;
+    }
+    spin_unlock_irqrestore(&usb_dev->tx_flow_lock, flags);
+
+    return woke;
 }
 
 static struct aicwf_usb_buf *aicwf_usb_tx_dequeue(struct aic_usb_dev *usb_dev,
@@ -145,7 +175,9 @@ static void aicwf_usb_msg_rx_buf_put(struct aic_usb_dev *usb_dev, struct aicwf_u
 }
 #endif
 
-void rwnx_stop_sta_all_queues(struct rwnx_sta *sta, struct rwnx_hw *rwnx_hw)
+#ifdef CONFIG_PER_STA_FC
+static void rwnx_stop_sta_all_queues(struct rwnx_sta *sta,
+                                     struct rwnx_hw *rwnx_hw)
 {
         u8 tid;
          struct rwnx_txq *txq;
@@ -155,7 +187,8 @@ void rwnx_stop_sta_all_queues(struct rwnx_sta *sta, struct rwnx_hw *rwnx_hw)
          }
  }
 
-void rwnx_wake_sta_all_queues(struct rwnx_sta *sta, struct rwnx_hw *rwnx_hw)
+static void rwnx_wake_sta_all_queues(struct rwnx_sta *sta,
+                                     struct rwnx_hw *rwnx_hw)
 {
         u8 tid;
          struct rwnx_txq *txq;
@@ -164,6 +197,7 @@ void rwnx_wake_sta_all_queues(struct rwnx_sta *sta, struct rwnx_hw *rwnx_hw)
                  netif_wake_subqueue(txq->ndev, txq->ndev_idx);
          }
  }
+#endif
 
 static void usb_txc_sta_flowctrl(struct aicwf_usb_buf *usb_buf, struct aic_usb_dev *usb_dev)
 {

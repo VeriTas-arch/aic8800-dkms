@@ -117,6 +117,13 @@ void get_userconfig_txpwr_lvl_in_fdrv(txpwr_lvl_conf_t *txpwr_lvl);
 void get_userconfig_txpwr_lvl_v2_in_fdrv(txpwr_lvl_conf_v2_t *txpwr_lvl_v2);
 void get_userconfig_txpwr_ofst_in_fdrv(txpwr_ofst_conf_t *txpwr_ofst);
 void get_userconfig_txpwr_loss(txpwr_loss_conf_t *txpwr_loss);
+void get_userconfig_xtal_cap(xtal_cap_conf_t *xtal_cap);
+int rwnx_request_firmware_common(struct rwnx_hw *rwnx_hw, u32 **buffer,
+                                 const char *filename);
+void rwnx_release_firmware_common(u32 **buffer);
+int rwnx_plat_bin_fw_upload_2(struct rwnx_hw *rwnx_hw, u32 fw_addr,
+                              char *filename);
+void rwnx_plat_userconfig_parsing(char *buffer, int size);
 int rwnx_platform_register_drv(void);
 void rwnx_platform_unregister_drv(void);
 

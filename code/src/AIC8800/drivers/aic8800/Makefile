@@ -47,7 +47,6 @@ KVER ?= $(shell uname -r)
 MODDESTDIR ?= /lib/modules/$(KVER)/kernel/drivers/net/wireless/aic8800
 ARCH ?= $(shell uname -m)
 CROSS_COMPILE ?=
-ccflags-y += -Wno-implicit-fallthrough -Wno-unused-function -Wno-unused-variable
 endif
 
 

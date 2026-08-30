@@ -12,6 +12,7 @@
 #include <linux/module.h>
 #include <linux/rtnetlink.h>
 
+#include "rwnx_mod_params.h"
 #include "rwnx_defs.h"
 #include "rwnx_tx.h"
 #include "hal_desc.h"
@@ -265,7 +266,7 @@ char ccode_channels[200];
 int index_for_channel_list = 0;
 module_param_string(ccode_channels, ccode_channels, 200, 0600);
 
-void rwnx_get_countrycode_channels(struct wiphy *wiphy,
+static void rwnx_get_countrycode_channels(struct wiphy *wiphy,
 		struct ieee80211_regdomain *regdomain){
 	enum nl80211_band band;
 	struct ieee80211_supported_band *sband;

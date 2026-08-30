@@ -18,6 +18,7 @@
 #include "rwnx_defs.h"
 #include "rwnx_strs.h"
 #include "rwnx_events.h"
+#include "rwnx_msg_tx.h"
 #include "aicwf_txrxif.h"
 #ifdef AICWF_SDIO_SUPPORT
 #include "aicwf_sdio.h"
@@ -28,8 +29,6 @@
  *
  */
 extern int aicwf_sdio_writeb(struct aic_sdio_dev *sdiodev, uint regaddr, u8 val);
-
-void rwnx_cmd_free(struct rwnx_cmd *cmd);
 
 static void cmd_dump(const struct rwnx_cmd *cmd)
 {
@@ -295,7 +294,7 @@ static int cmd_mgr_llind(struct rwnx_cmd_mgr *cmd_mgr, struct rwnx_cmd *cmd)
     return 0;
 }
 
-void cmd_mgr_task_process(struct work_struct *work)
+static void cmd_mgr_task_process(struct work_struct *work)
 {
     struct rwnx_cmd_mgr *cmd_mgr = container_of(work, struct rwnx_cmd_mgr, cmdWork);
     struct rwnx_cmd *cur, *next = NULL;
@@ -538,4 +537,3 @@ void aicwf_set_cmd_tx(void *dev, struct lmac_msg *msg, uint len)
 
     aicwf_bus_txmsg(bus, buffer, len + 8);
 }
-

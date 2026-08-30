@@ -21,6 +21,7 @@ int rwnx_conn_track_start(struct rwnx_vif *rwnx_vif,
 void rwnx_conn_track_abort(struct rwnx_vif *rwnx_vif, const char *reason);
 enum rwnx_conn_txn_kind rwnx_conn_track_kind(struct rwnx_vif *rwnx_vif);
 u32 rwnx_conn_track_id(struct rwnx_vif *rwnx_vif);
+bool rwnx_conn_tx_paused(struct rwnx_vif *rwnx_vif);
 void rwnx_conn_cancel(struct rwnx_vif *rwnx_vif, u16 reason,
                       const char *source);
 

@@ -16,6 +16,7 @@
 #define USB_TXQUEUE_CNT     NX_TXQ_CNT
 #define USB_TXDESC_CNT      NX_TXDESC_CNT
 
+struct txdesc_host;
 
 /// Definition of the IPC Host environment structure.
 struct usb_host_env_tag
@@ -36,6 +37,9 @@ extern void aicwf_usb_host_init(struct usb_host_env_tag *env,
                   void *cb, void *shared_env_ptr, void *pthis);
 
 extern void aicwf_usb_host_txdesc_push(struct usb_host_env_tag *env, const int queue_idx, const uint64_t host_id);
+
+volatile struct txdesc_host *
+aicwf_usb_host_txdesc_get(struct usb_host_env_tag *env, const int queue_idx);
 
 extern void aicwf_usb_host_tx_cfm_handler(struct usb_host_env_tag *env, u32 *data);
 extern int aicwf_rwnx_usb_platform_init(struct aic_usb_dev *usbdev);

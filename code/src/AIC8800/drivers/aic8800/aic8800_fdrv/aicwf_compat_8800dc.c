@@ -1,5 +1,7 @@
 #include "rwnx_main.h"
 #include "rwnx_msg_tx.h"
+#include "rwnx_platform.h"
+#include "aicwf_compat_8800dc.h"
 #include "reg_access.h"
 
 #define RWNX_MAC_FW_RF_BASE_NAME_8800DC   "lmacfw_rf_8800dc.bin"
@@ -24,13 +26,6 @@
 #define RWNX_MAC_RF_PATCH_BASE_NAME_8800DC     "fmacfw_rf_patch_8800dc"
 #define RWNX_MAC_RF_PATCH_NAME_8800DC RWNX_MAC_RF_PATCH_BASE_NAME_8800DC".bin"
 #define FW_USERCONFIG_NAME_8800DC         "aic_userconfig_8800dc.txt"
-
-int rwnx_plat_bin_fw_upload_2(struct rwnx_hw *rwnx_hw, u32 fw_addr,
-                               char *filename);
-int rwnx_request_firmware_common(struct rwnx_hw *rwnx_hw,
-	u32** buffer, const char *filename);
-void rwnx_plat_userconfig_parsing(char *buffer, int size);
-void rwnx_release_firmware_common(u32** buffer);
 
 typedef u32 (*array2_tbl_t)[2];
 
@@ -2109,4 +2104,3 @@ void system_config_8800dc(struct rwnx_hw *rwnx_hw){
     }
 
 }
-

@@ -9,6 +9,7 @@
  */
 #include <linux/interrupt.h>
 
+#include "rwnx_irqs.h"
 #include "rwnx_defs.h"
 #include "ipc_host.h"
 #include "rwnx_prof.h"
