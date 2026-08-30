@@ -17,6 +17,7 @@
 #include <linux/device.h>
 #include <linux/dmapool.h>
 #include <linux/skbuff.h>
+#include <linux/workqueue.h>
 #include <net/cfg80211.h>
 #include <linux/slab.h>
 
@@ -320,6 +321,35 @@ enum rwnx_ap_flags {
     RWNX_AP_ISOLATE = BIT(0),
 };
 
+enum rwnx_conn_txn_kind {
+    RWNX_CONN_TXN_NONE = 0,
+    RWNX_CONN_TXN_INITIAL,
+    RWNX_CONN_TXN_ROAM,
+};
+
+enum rwnx_conn_txn_phase {
+    RWNX_CONN_TXN_IDLE = 0,
+    RWNX_CONN_TXN_WAIT_RESULT,
+    RWNX_CONN_TXN_OLD_LINK_GONE,
+};
+
+struct rwnx_conn_txn {
+    spinlock_t lock;
+    struct delayed_work timeout_work;
+    u32 id;
+    enum rwnx_conn_txn_kind kind;
+    enum rwnx_conn_txn_phase phase;
+    unsigned long start_jiffies;
+    bool target_valid;
+    bool prev_valid;
+    bool late_disconnect_pending;
+    unsigned long late_disconnect_deadline;
+    u32 late_disconnect_txn_id;
+    u8 old_ap_idx;
+    u8 target_bssid[ETH_ALEN];
+    u8 prev_bssid[ETH_ALEN];
+};
+
 /*
  * Structure used to save information relative to the managed interfaces.
  * This is also linked within the rwnx_hw vifs list.
@@ -333,6 +363,7 @@ struct rwnx_vif {
     struct net_device_stats net_stats;
     struct rwnx_key key[6];
     atomic_t drv_conn_state;
+    struct rwnx_conn_txn conn_txn;
     u8 drv_vif_index;           /* Identifier of the VIF in driver */
     u8 vif_index;               /* Identifier of the station in FW */
     u8 ch_index;                /* Channel context identifier */

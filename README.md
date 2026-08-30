@@ -9,7 +9,7 @@
 
 ## 目录说明
 
-- `code/scripts`: DKMS 安装、刷新、清理与版本同步脚本
+- `code/scripts`: 只编译验证、DKMS 安装、刷新、清理与版本同步脚本
 - `code/src/AIC8800`: 驱动源码、固件与 udev 规则
 - `code/VERSION`: 仓库内统一版本号来源
 
@@ -28,6 +28,24 @@ sudo apt install dkms build-essential linux-headers-$(uname -r)
 ## 快速开始
 
 以下命令默认在仓库根目录执行。
+
+### 只编译验证（推荐先执行）
+
+该脚本在临时目录中编译 `aic_load_fw.ko` 和 `aic8800_fdrv.ko`，结束后自动清理。
+它不会调用 `sudo`、DKMS、安装模块、加载模块或修改网络状态。
+
+```bash
+chmod +x code/scripts/build-test.sh
+./code/scripts/build-test.sh
+```
+
+也可以指定已安装 headers 的目标内核：
+
+```bash
+./code/scripts/build-test.sh 6.8.0-xx-generic
+```
+
+### 安装或刷新 DKMS
 
 1. 本机当前内核安装
 

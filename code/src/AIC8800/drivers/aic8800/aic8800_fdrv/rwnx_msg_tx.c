@@ -2226,13 +2226,7 @@ int rwnx_send_sm_connect_req(struct rwnx_hw *rwnx_hw,
     struct sm_connect_req *req;
     int i;
     u32_l flags = 0;
-    bool gval = false;
-    bool pval = false;
-	
-    rwnx_vif->wep_enabled = false;
-    rwnx_vif->wep_auth_err = false;
-    rwnx_vif->last_auth_type = 0;
-	
+    const u8 zero_bssid[ETH_ALEN] = {0};
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
@@ -2241,17 +2235,6 @@ int rwnx_send_sm_connect_req(struct rwnx_hw *rwnx_hw,
                                    sizeof(struct sm_connect_req));
     if (!req)
         return -ENOMEM;
-
-    if ((sme->crypto.cipher_group == WLAN_CIPHER_SUITE_WEP40) ||
-        (sme->crypto.cipher_group == WLAN_CIPHER_SUITE_WEP104)) {
-         gval = true;
-    }
-
-    if (sme->crypto.n_ciphers_pairwise &&
-        ((sme->crypto.ciphers_pairwise[0] == WLAN_CIPHER_SUITE_WEP40) ||
-         (sme->crypto.ciphers_pairwise[0] == WLAN_CIPHER_SUITE_WEP104))) {
-        pval = true;
-    }
 
     /* Set parameters for the SM_CONNECT_REQ message */
     if (sme->crypto.n_ciphers_pairwise &&
@@ -2273,7 +2256,7 @@ int rwnx_send_sm_connect_req(struct rwnx_hw *rwnx_hw,
     if (sme->mfp == NL80211_MFP_REQUIRED)
         flags |= MFP_IN_USE;
 #endif
-    if (rwnx_vif->sta.ap)
+    if (sme->prev_bssid)
         flags |= REASSOCIATION;
 
     req->ctrl_port_ethertype = sme->crypto.control_port_ethertype;
@@ -2322,35 +2305,16 @@ int rwnx_send_sm_connect_req(struct rwnx_hw *rwnx_hw,
     /* Set UAPSD queues */
     req->uapsd_queues = rwnx_mod_params.uapsd_queues;
 
-    rwnx_vif->wep_enabled = pval & gval;
-
-    if (rwnx_vif->wep_enabled) {
-        rwnx_vif->last_auth_type = sme->auth_type;
-    }
-#ifdef CONFIG_USE_WIRELESS_EXT
-	memset(rwnx_hw->wext_essid, 0, 32);
-	memcpy(rwnx_hw->wext_essid, sme->ssid, (int)sme->ssid_len);
-#endif
-
-	rwnx_vif->sta.ssid_len = (int)sme->ssid_len;
-	memset(rwnx_vif->sta.ssid, 0, rwnx_vif->sta.ssid_len + 1);
-	memcpy(rwnx_vif->sta.ssid, sme->ssid, rwnx_vif->sta.ssid_len);
-	memcpy(rwnx_vif->sta.bssid, sme->bssid, ETH_ALEN);
-
-	AICWFDBG(LOGINFO, "%s drv_vif_index:%d connect to %s(%d) channel:%d auth_type:%d\r\n",
+	AICWFDBG(LOGINFO, "%s drv_vif_index:%d connect to %.*s(%zu) bssid:%pM prev:%pM channel:%d auth_type:%d reassoc:%d\r\n",
 		__func__,
 		rwnx_vif->drv_vif_index,
-		rwnx_vif->sta.ssid,
-		rwnx_vif->sta.ssid_len,
+		(int)sme->ssid_len, sme->ssid,
+		sme->ssid_len,
+		req->bssid.array,
+		sme->prev_bssid ? sme->prev_bssid : zero_bssid,
 		req->chan.freq,
-		req->auth_type);
-
-    printk("connect mac %x %x %x %x %x %x\n", rwnx_vif->sta.bssid[0],
-        rwnx_vif->sta.bssid[1],
-        rwnx_vif->sta.bssid[2],
-        rwnx_vif->sta.bssid[3],
-        rwnx_vif->sta.bssid[4],
-        rwnx_vif->sta.bssid[5]);
+		req->auth_type,
+		!!(flags & REASSOCIATION));
     /* Send the SM_CONNECT_REQ message to LMAC FW */
     return rwnx_send_msg(rwnx_hw, req, 1, SM_CONNECT_CFM, cfm);
 

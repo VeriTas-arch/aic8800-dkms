@@ -40,6 +40,7 @@
 #include "rwnx_compat.h"
 #include "rwnx_version.h"
 #include "rwnx_main.h"
+#include "rwnx_msg_rx.h"
 #include "aicwf_txrxif.h"
 #include "aicwf_compat_8800dc.h"
 
@@ -54,8 +55,6 @@
 #include "aicwf_usb.h"
 #endif
 #include <linux/semaphore.h>
-
-extern void rwnx_conn_track_connect_start(u8 vif_idx, const u8 *bssid);
 
 #define RW_DRV_DESCRIPTION  "RivieraWaves 11nac driver for Linux cfg80211"
 #define RW_DRV_COPYRIGHT    "Copyright(c) 2015-2017 RivieraWaves"
@@ -1360,6 +1359,8 @@ static int rwnx_close(struct net_device *dev)
 #endif
 	AICWFDBG(LOGINFO, "%s %s Enter\n", __func__, dev->name);
 
+    rwnx_conn_cancel(rwnx_vif, WLAN_REASON_DEAUTH_LEAVING, "close");
+
 #ifdef CONFIG_USE_P2P0
     if(rwnx_hw->p2p_dev_vif){
         atomic_set(&rwnx_hw->p2p_alive_timer_count, P2P_ALIVE_TIME_MS);
@@ -1399,7 +1400,6 @@ static int rwnx_close(struct net_device *dev)
 			RWNX_VIF_TYPE(rwnx_vif) == NL80211_IFTYPE_P2P_CLIENT){
 			if(atomic_read(&rwnx_vif->drv_conn_state) == (int)RWNX_DRV_STATUS_CONNECTING){
 				rwnx_send_sm_disconnect_req(rwnx_hw, rwnx_vif, 3);
-				atomic_set(&rwnx_vif->drv_conn_state, RWNX_DRV_STATUS_DISCONNECTED);
 			}
 		}
 #ifdef CONFIG_USE_P2P0
@@ -2770,6 +2770,7 @@ static struct rwnx_vif *rwnx_interface_add(struct rwnx_hw *rwnx_hw,
     vif->rwnx_hw = rwnx_hw;
     vif->ndev = ndev;
     vif->drv_vif_index = vif_idx;
+    rwnx_conn_track_init(vif);
     SET_NETDEV_DEV(ndev, wiphy_dev(vif->wdev.wiphy));
     vif->wdev.netdev = ndev;
     vif->wdev.iftype = type;
@@ -2877,6 +2878,7 @@ static struct rwnx_vif *rwnx_interface_add(struct rwnx_hw *rwnx_hw,
     return vif;
 
 err:
+    rwnx_conn_track_deinit(vif);
     free_netdev(ndev);
     return NULL;
 }
@@ -2993,15 +2995,16 @@ static struct wireless_dev *rwnx_virtual_interface_add(struct rwnx_hw *rwnx_hw,
     wdev = &vif->wdev;
     wdev->wiphy = rwnx_hw->wiphy;
     wdev->iftype = type;
+    vif->rwnx_hw = rwnx_hw;
+    vif->vif_index = vif_idx;
+    vif->drv_vif_index = vif_idx;
+    rwnx_conn_track_init(vif);
 
     AICWFDBG(LOGINFO, "rwnx_virtual_interface_add, ifname=%s, wdev=%p, vif_idx=%d\n", name, wdev, vif_idx);
 
     #ifndef CONFIG_USE_P2P0
     vif->is_p2p_vif = 1;
-    vif->rwnx_hw = rwnx_hw;
-    vif->vif_index = vif_idx;
     vif->wdev.wiphy = rwnx_hw->wiphy;
-    vif->drv_vif_index = vif_idx;
     vif->up = false;
     vif->ch_index = RWNX_CH_NOT_SET;
     memset(&vif->net_stats, 0, sizeof(vif->net_stats));
@@ -3137,6 +3140,11 @@ static int rwnx_cfg80211_del_iface(struct wiphy *wiphy, struct wireless_dev *wde
    // printk("del_iface: %p\n",wdev);
 
 	AICWFDBG(LOGINFO, "del_iface: %p, %x\n",wdev, wdev->address[5]);
+
+    if (rwnx_vif->ndev)
+        rwnx_conn_cancel(rwnx_vif, WLAN_REASON_DEAUTH_LEAVING,
+                         "del_iface");
+    rwnx_conn_track_deinit(rwnx_vif);
 
     if (!dev || !rwnx_vif->ndev) {
 #if 0
@@ -3662,177 +3670,240 @@ static int rwnx_cfg80211_set_default_mgmt_key(struct wiphy *wiphy,
  *	(invoked with the wireless_dev mutex held)
  */
 
-static int rwnx_cfg80211_connect(struct wiphy *wiphy, struct net_device *dev,
+static int rwnx_cfg80211_connect(struct wiphy *wiphy,
+                                 struct net_device *dev,
                                  struct cfg80211_connect_params *sme)
 {
     struct rwnx_hw *rwnx_hw = wiphy_priv(wiphy);
     struct rwnx_vif *rwnx_vif = netdev_priv(dev);
     struct sm_connect_cfm sm_connect_cfm;
-    int error = 0;
-    int is_wep = ((sme->crypto.cipher_group == WLAN_CIPHER_SUITE_WEP40) ||
-	                (sme->crypto.cipher_group == WLAN_CIPHER_SUITE_WEP104) ||
-	                (sme->crypto.ciphers_pairwise[0] == WLAN_CIPHER_SUITE_WEP40) ||
-		            (sme->crypto.ciphers_pairwise[0] == WLAN_CIPHER_SUITE_WEP104));
+    enum rwnx_conn_txn_kind kind;
+    int prev_state;
+    int error;
+    int ssid_len;
+    u32 txn_id;
+    bool pairwise_wep =
+        sme->crypto.n_ciphers_pairwise &&
+        (sme->crypto.ciphers_pairwise[0] == WLAN_CIPHER_SUITE_WEP40 ||
+         sme->crypto.ciphers_pairwise[0] == WLAN_CIPHER_SUITE_WEP104);
+    bool is_wep =
+        sme->crypto.cipher_group == WLAN_CIPHER_SUITE_WEP40 ||
+        sme->crypto.cipher_group == WLAN_CIPHER_SUITE_WEP104 ||
+        pairwise_wep;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
-#if 1
-#if 0
-	if((int)atomic_read(&rwnx_vif->drv_conn_state) == (int)RWNX_DRV_STATUS_CONNECTED){
-		AICWFDBG(LOGERROR, "%s driver was connected return it \r\n", __func__);
-		return -EALREADY;
-	}
-#endif
-	if((int)atomic_read(&rwnx_vif->drv_conn_state) == (int)RWNX_DRV_STATUS_DISCONNECTING){
-		AICWFDBG(LOGERROR, "%s driver is disconnecting return it \r\n", __func__);
-		return -EALREADY;
-	}
-#endif
+    prev_state = atomic_read(&rwnx_vif->drv_conn_state);
+    if (prev_state == RWNX_DRV_STATUS_DISCONNECTING)
+        return -EALREADY;
+    if (prev_state == RWNX_DRV_STATUS_CONNECTING)
+        return -EINPROGRESS;
 
-	atomic_set(&rwnx_vif->drv_conn_state, (int)RWNX_DRV_STATUS_CONNECTING);
-    rwnx_conn_track_connect_start(rwnx_vif->vif_index, sme->bssid);
+    if (sme->prev_bssid) {
+        if (prev_state != RWNX_DRV_STATUS_CONNECTED ||
+            !rwnx_vif->sta.ap) {
+            AICWFDBG(LOGERROR,
+                     "connect rejected: roam without active AP state:%d prev:%pM\r\n",
+                     prev_state, sme->prev_bssid);
+            return -ENOTCONN;
+        }
+        if (memcmp(sme->prev_bssid, rwnx_vif->sta.ap->mac_addr,
+                   ETH_ALEN)) {
+            AICWFDBG(LOGERROR,
+                     "connect rejected: stale prev_bssid expected:%pM actual:%pM\r\n",
+                     sme->prev_bssid, rwnx_vif->sta.ap->mac_addr);
+            return -ESTALE;
+        }
+        kind = RWNX_CONN_TXN_ROAM;
+    } else {
+        if (prev_state == RWNX_DRV_STATUS_CONNECTED ||
+            rwnx_vif->sta.ap) {
+            AICWFDBG(LOGERROR,
+                     "connect rejected: initial request while connected state:%d ap:%p\r\n",
+                     prev_state, rwnx_vif->sta.ap);
+            return -EISCONN;
+        }
+        kind = RWNX_CONN_TXN_INITIAL;
+    }
 
-    if(is_wep) {
-        if(sme->auth_type == NL80211_AUTHTYPE_AUTOMATIC) {
-            if(rwnx_vif->wep_enabled && rwnx_vif->wep_auth_err) {
-                if(rwnx_vif->last_auth_type == NL80211_AUTHTYPE_SHARED_KEY)
+    if (is_wep) {
+        if (sme->auth_type == NL80211_AUTHTYPE_AUTOMATIC) {
+            if (rwnx_vif->wep_enabled && rwnx_vif->wep_auth_err) {
+                if (rwnx_vif->last_auth_type ==
+                    NL80211_AUTHTYPE_SHARED_KEY)
                     sme->auth_type = NL80211_AUTHTYPE_OPEN_SYSTEM;
                 else
                     sme->auth_type = NL80211_AUTHTYPE_SHARED_KEY;
+            } else if (rwnx_vif->wep_enabled &&
+                       !rwnx_vif->wep_auth_err) {
+                sme->auth_type = rwnx_vif->last_auth_type;
             } else {
-                    if((rwnx_vif->wep_enabled && !rwnx_vif->wep_auth_err))
-                        sme->auth_type = rwnx_vif->last_auth_type;
-                    else
-                        sme->auth_type = NL80211_AUTHTYPE_SHARED_KEY;
+                sme->auth_type = NL80211_AUTHTYPE_SHARED_KEY;
             }
-			AICWFDBG(LOGINFO, "auto: use sme->auth_type = %d\r\n", sme->auth_type);
-        } else {
-            if (rwnx_vif->wep_enabled && rwnx_vif->wep_auth_err && (sme->auth_type == rwnx_vif->last_auth_type)) {
-                if(sme->auth_type == NL80211_AUTHTYPE_SHARED_KEY) {
-                    sme->auth_type = NL80211_AUTHTYPE_OPEN_SYSTEM;
-					AICWFDBG(LOGINFO, "start connect, auth_type changed, shared --> open\n");
-                } else if(sme->auth_type == NL80211_AUTHTYPE_OPEN_SYSTEM) {
-                    sme->auth_type = NL80211_AUTHTYPE_SHARED_KEY;
-					AICWFDBG(LOGINFO, "start connect, auth_type changed, open --> shared\n");
-                }
-            }
+        } else if (rwnx_vif->wep_enabled &&
+                   rwnx_vif->wep_auth_err &&
+                   sme->auth_type == rwnx_vif->last_auth_type) {
+            if (sme->auth_type == NL80211_AUTHTYPE_SHARED_KEY)
+                sme->auth_type = NL80211_AUTHTYPE_OPEN_SYSTEM;
+            else if (sme->auth_type ==
+                     NL80211_AUTHTYPE_OPEN_SYSTEM)
+                sme->auth_type = NL80211_AUTHTYPE_SHARED_KEY;
         }
     }
 
-    /* For SHARED-KEY authentication, must install key first */
-    if (sme->auth_type == NL80211_AUTHTYPE_SHARED_KEY && sme->key)
-    {
+    if (sme->auth_type == NL80211_AUTHTYPE_SHARED_KEY && sme->key) {
         struct key_params key_params;
-        key_params.key = (u8*)sme->key;
+
+        key_params.key = (u8 *)sme->key;
         key_params.seq = NULL;
         key_params.key_len = sme->key_len;
         key_params.seq_len = 0;
         key_params.cipher = sme->crypto.cipher_group;
         rwnx_cfg80211_add_key(wiphy, dev,
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
-                                0,
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+                              0,
 #endif
-	sme->key_idx, false, NULL, &key_params);
+                              sme->key_idx, false, NULL, &key_params);
     }
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 17, 0) || defined(CONFIG_WPA3_FOR_OLD_KERNEL)
-    else if ((sme->auth_type == NL80211_AUTHTYPE_SAE) &&
+    else if (sme->auth_type == NL80211_AUTHTYPE_SAE &&
              !(sme->flags & CONNECT_REQ_EXTERNAL_AUTH_SUPPORT)) {
-        netdev_err(dev, "Doesn't support SAE without external authentication\n");
+        netdev_err(dev,
+                   "Doesn't support SAE without external authentication\n");
         return -EINVAL;
     }
 #endif
 
-    if (rwnx_vif->wdev.iftype == NL80211_IFTYPE_P2P_CLIENT) {
-        rwnx_hw->is_p2p_connected = 1;
-    }
+    error = rwnx_conn_track_start(rwnx_vif, kind, sme->bssid,
+                                  sme->prev_bssid);
+    if (error)
+        return error;
+    txn_id = rwnx_conn_track_id(rwnx_vif);
 
-    if (rwnx_vif->wdev.iftype == NL80211_IFTYPE_STATION || rwnx_vif->wdev.iftype == NL80211_IFTYPE_P2P_CLIENT) {
+    if (rwnx_vif->wdev.iftype == NL80211_IFTYPE_P2P_CLIENT)
+        rwnx_hw->is_p2p_connected = 1;
+    if (rwnx_vif->wdev.iftype == NL80211_IFTYPE_STATION ||
+        rwnx_vif->wdev.iftype == NL80211_IFTYPE_P2P_CLIENT) {
         rwnx_vif->sta.paired_cipher_type = 0xff;
         rwnx_vif->sta.group_cipher_type = 0xff;
     }
 
-
-    /* Forward the information to the LMAC */
-    if ((error = rwnx_send_sm_connect_req(rwnx_hw, rwnx_vif, sme, &sm_connect_cfm)))
+    error = rwnx_send_sm_connect_req(rwnx_hw, rwnx_vif, sme,
+                                     &sm_connect_cfm);
+    if (error) {
+        atomic_set(&rwnx_vif->drv_conn_state, prev_state);
+        rwnx_conn_track_abort(rwnx_vif, "send_error");
+        AICWFDBG(LOGERROR,
+                 "conn_txn_cfm id:%u vif:%u transport_error:%d state:%d\r\n",
+                 txn_id, rwnx_vif->vif_index, error, prev_state);
         return error;
-
-    // Check the status
-    switch (sm_connect_cfm.status)
-    {
-        case CO_OK:
-            error = 0;
-            break;
-        case CO_BUSY:
-            error = -EINPROGRESS;
-            break;
-        case CO_OP_IN_PROGRESS:
-            error = -EALREADY;
-            break;
-        default:
-            error = -EIO;
-            break;
     }
 
-    return error;
+    AICWFDBG(LOGINFO,
+             "conn_txn_cfm id:%u vif:%u kind:%u fw_status:%u\r\n",
+             txn_id, rwnx_vif->vif_index, kind,
+             sm_connect_cfm.status);
+    switch (sm_connect_cfm.status) {
+    case CO_OK:
+        error = 0;
+        break;
+    case CO_BUSY:
+        error = -EINPROGRESS;
+        break;
+    case CO_OP_IN_PROGRESS:
+        error = -EALREADY;
+        break;
+    default:
+        error = -EIO;
+        break;
+    }
+
+    if (error) {
+        atomic_set(&rwnx_vif->drv_conn_state, prev_state);
+        rwnx_conn_track_abort(rwnx_vif, "cfm_reject");
+        if (rwnx_vif->wdev.iftype == NL80211_IFTYPE_P2P_CLIENT)
+            rwnx_hw->is_p2p_connected =
+                kind == RWNX_CONN_TXN_ROAM;
+        return error;
+    }
+
+    rwnx_vif->wep_enabled = is_wep;
+    rwnx_vif->wep_auth_err = false;
+    rwnx_vif->last_auth_type =
+        is_wep ? sme->auth_type : NL80211_AUTHTYPE_AUTOMATIC;
+
+    ssid_len = min_t(int, sme->ssid_len,
+                     sizeof(rwnx_vif->sta.ssid) - 1);
+    memset(rwnx_vif->sta.ssid, 0,
+           sizeof(rwnx_vif->sta.ssid));
+    if (ssid_len)
+        memcpy(rwnx_vif->sta.ssid, sme->ssid, ssid_len);
+    rwnx_vif->sta.ssid_len = ssid_len;
+    if (sme->bssid)
+        memcpy(rwnx_vif->sta.bssid, sme->bssid, ETH_ALEN);
+    else
+        eth_zero_addr(rwnx_vif->sta.bssid);
+
+#ifdef CONFIG_USE_WIRELESS_EXT
+    memset(rwnx_hw->wext_essid, 0, sizeof(rwnx_hw->wext_essid));
+    memcpy(rwnx_hw->wext_essid, sme->ssid,
+           min_t(size_t, sme->ssid_len,
+                 sizeof(rwnx_hw->wext_essid)));
+#endif
+
+    return 0;
 }
 
 /**
  * @disconnect: Disconnect from the BSS/ESS.
- *	(invoked with the wireless_dev mutex held)
+ *  (invoked with the wireless_dev mutex held)
  */
-static int rwnx_cfg80211_disconnect(struct wiphy *wiphy, struct net_device *dev,
+static int rwnx_cfg80211_disconnect(struct wiphy *wiphy,
+                                    struct net_device *dev,
                                     u16 reason_code)
 {
     struct rwnx_hw *rwnx_hw = wiphy_priv(wiphy);
     struct rwnx_vif *rwnx_vif = netdev_priv(dev);
+    enum rwnx_conn_txn_kind txn_kind;
+    int state;
+    int error = 0;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
-	AICWFDBG(LOGINFO, "%s drv_vif_index:%d disconnect reason:%d \r\n",
-		__func__, rwnx_vif->drv_vif_index, reason_code);
+    state = atomic_read(&rwnx_vif->drv_conn_state);
+    txn_kind = rwnx_conn_track_kind(rwnx_vif);
+    AICWFDBG(LOGINFO,
+             "cfg_disconnect vif:%u reason:%u state:%d txn:%u id:%u\r\n",
+             rwnx_vif->vif_index, reason_code, state, txn_kind,
+             rwnx_conn_track_id(rwnx_vif));
 
-#if 0
-	while(atomic_read(&rwnx_vif->drv_conn_state) == RWNX_DRV_STATUS_CONNECTING){
-		AICWFDBG(LOGERROR, "%s driver connecting waiting 100ms \r\n", __func__);
-		msleep(100);
-		retry--;
-		if(retry == 0){
-			break;
-		}
-		if(rwnx_hw->usbdev->state == USB_DOWN_ST){
-			break;
-		}
-	}
-	if(atomic_read(&rwnx_vif->drv_conn_state) == RWNX_DRV_STATUS_CONNECTED){
-
-		atomic_set(&rwnx_vif->drv_conn_state, RWNX_DRV_STATUS_DISCONNECTING);
-	}
-#endif
-	if(atomic_read(&rwnx_vif->drv_conn_state) == RWNX_DRV_STATUS_CONNECTING){
-		AICWFDBG(LOGINFO, "%s call cfg80211_connect_result reason:%d \r\n",
-			__func__, reason_code);
-		msleep(500);
-	}
-
-	if(atomic_read(&rwnx_vif->drv_conn_state) == RWNX_DRV_STATUS_CONNECTED){
-		atomic_set(&rwnx_vif->drv_conn_state, RWNX_DRV_STATUS_DISCONNECTING);
-
-		#ifdef CONFIG_USE_WIRELESS_EXT
-		memset(rwnx_hw->wext_essid, 0, 32);
-		#endif
-		key_flag = true;
-		return(rwnx_send_sm_disconnect_req(rwnx_hw, rwnx_vif, reason_code));
-    }else if (atomic_read(&rwnx_vif->drv_conn_state) == RWNX_DRV_STATUS_CONNECTING) {
-		cfg80211_connect_result(dev,  NULL, NULL, 0, NULL, 0,
-			reason_code?reason_code:WLAN_STATUS_UNSPECIFIED_FAILURE, GFP_ATOMIC);
-		atomic_set(&rwnx_vif->drv_conn_state, RWNX_DRV_STATUS_DISCONNECTED);
-		return 0;
-    }else{
-        atomic_set(&rwnx_vif->drv_conn_state, RWNX_DRV_STATUS_DISCONNECTED);
+    if (txn_kind != RWNX_CONN_TXN_NONE) {
+        if (rwnx_vif->up)
+            error = rwnx_send_sm_disconnect_req(rwnx_hw, rwnx_vif,
+                                                reason_code);
+        rwnx_conn_cancel(rwnx_vif, reason_code,
+                         "cfg80211_disconnect");
+        if (error)
+            AICWFDBG(LOGERROR,
+                     "cfg_disconnect firmware request failed:%d after local cancellation\r\n",
+                     error);
         return 0;
-	}
+    }
 
+    if (state == RWNX_DRV_STATUS_CONNECTED) {
+        atomic_set(&rwnx_vif->drv_conn_state,
+                   RWNX_DRV_STATUS_DISCONNECTING);
+#ifdef CONFIG_USE_WIRELESS_EXT
+        memset(rwnx_hw->wext_essid, 0, 32);
+#endif
+        key_flag = true;
+        return rwnx_send_sm_disconnect_req(rwnx_hw, rwnx_vif,
+                                           reason_code);
+    }
+
+    atomic_set(&rwnx_vif->drv_conn_state,
+               RWNX_DRV_STATUS_DISCONNECTED);
+    return 0;
 }
-
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 17, 0) || defined(CONFIG_WPA3_FOR_OLD_KERNEL)
 /**
  * @external_auth: indicates result of offloaded authentication processing from
@@ -9148,6 +9219,7 @@ static int __init rwnx_mod_init(void)
     RWNX_DBG(RWNX_FN_ENTRY_STR);
     rwnx_print_version();
 	AICWFDBG(LOGINFO, "RELEASE DATE:%s \r\n", RELEASE_DATE);
+	AICWFDBG(LOGINFO, "conn_txn_revision=2 timeout_ms=12000 late_disconnect_guard_ms=1500\r\n");
 	rwnx_init_cmd_array();
 
 	sema_init(&aicwf_deinit_sem, 1);
@@ -9209,4 +9281,3 @@ MODULE_DESCRIPTION(RW_DRV_DESCRIPTION);
 MODULE_VERSION(RWNX_VERS_MOD);
 MODULE_AUTHOR(RW_DRV_COPYRIGHT " " RW_DRV_AUTHOR);
 MODULE_LICENSE("GPL");
-
