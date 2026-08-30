@@ -28,6 +28,10 @@
 #endif
 
 /* Generic */
+#ifndef fallthrough
+#define fallthrough do {} while (0)
+#endif
+
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 9, 0)
 #define __bf_shf(x) (__builtin_ffsll(x) - 1)
 #define FIELD_PREP(_mask, _val) \

@@ -1135,7 +1135,7 @@ static void rwnx_rx_add_rtap_hdr(struct rwnx_hw* rwnx_hw,
 
     // Check for HE frames
     if (rxvect->format_mod == FORMATMOD_HE_SU) {
-        struct ieee80211_radiotap_he he;
+        struct ieee80211_radiotap_he he = {};
         #define HE_PREP(f, val) cpu_to_le16(FIELD_PREP(IEEE80211_RADIOTAP_HE_##f, val))
         #define D1_KNOWN(f) cpu_to_le16(IEEE80211_RADIOTAP_HE_DATA1_##f##_KNOWN)
         #define D2_KNOWN(f) cpu_to_le16(IEEE80211_RADIOTAP_HE_DATA2_##f##_KNOWN)
@@ -1191,8 +1191,18 @@ static void rwnx_rx_add_rtap_hdr(struct rwnx_hw* rwnx_hw,
         while ((pos - (u8 *)rtap) & 1)
             pos++;
         rtap->it_present |= cpu_to_le32(1 << IEEE80211_RADIOTAP_HE);
-        memcpy(pos, &he, sizeof(he));
-        pos += sizeof(he);
+        put_unaligned_le16(le16_to_cpu(he.data1), pos);
+        pos += sizeof(he.data1);
+        put_unaligned_le16(le16_to_cpu(he.data2), pos);
+        pos += sizeof(he.data2);
+        put_unaligned_le16(le16_to_cpu(he.data3), pos);
+        pos += sizeof(he.data3);
+        put_unaligned_le16(le16_to_cpu(he.data4), pos);
+        pos += sizeof(he.data4);
+        put_unaligned_le16(le16_to_cpu(he.data5), pos);
+        pos += sizeof(he.data5);
+        put_unaligned_le16(le16_to_cpu(he.data6), pos);
+        pos += sizeof(he.data6);
     }
 
     // Rx Chains
@@ -1977,7 +1987,7 @@ u8 rwnx_rxdataind_aicwf(struct rwnx_hw *rwnx_hw, void *hostid, void *rx_priv)
             skb->len = frm_len;
 
             //Check if there is enough space to add the radiotap header
-            if (skb_headroom(skb) > rtap_len) {
+            if (skb_headroom(skb) >= rtap_len) {
 
                 skb_monitor = skb;
 
@@ -1991,10 +2001,16 @@ u8 rwnx_rxdataind_aicwf(struct rwnx_hw *rwnx_hw, void *hostid, void *rx_priv)
 
                 //Reset original skb->data pointer
                 skb->data = (void*) hw_rxhdr;
+                if (!skb_monitor) {
+                    dev_kfree_skb(skb);
+                    goto end;
+                }
             }
         } else {
         #ifdef CONFIG_RWNX_MON_DATA
         skb_monitor = skb_copy_expand(skb, rtap_len, 0, GFP_ATOMIC);
+        if (!skb_monitor)
+            goto check_len_update;
         skb_monitor->data += (msdu_offset + 2); //sdio/usb word allign
 
         //Save frame length
@@ -2002,16 +2018,18 @@ u8 rwnx_rxdataind_aicwf(struct rwnx_hw *rwnx_hw, void *hostid, void *rx_priv)
         #endif
         }
 
-        skb_reset_tail_pointer(skb_monitor);
-        skb_monitor->len = 0;
-        skb_put(skb_monitor, frm_len);
+        if (skb_monitor) {
+            skb_reset_tail_pointer(skb_monitor);
+            skb_monitor->len = 0;
+            skb_put(skb_monitor, frm_len);
 
-        if (rwnx_rx_monitor(rwnx_hw, rwnx_vif, skb_monitor, hw_rxhdr, rtap_len))
-            dev_kfree_skb(skb_monitor);
+            if (rwnx_rx_monitor(rwnx_hw, rwnx_vif, skb_monitor, hw_rxhdr, rtap_len))
+                dev_kfree_skb(skb_monitor);
 
-        if (status == RX_STAT_MONITOR) {
-            if (skb_monitor != skb) {
-                dev_kfree_skb(skb);
+            if (status == RX_STAT_MONITOR) {
+                if (skb_monitor != skb) {
+                    dev_kfree_skb(skb);
+                }
             }
         }
     }
@@ -2218,4 +2236,3 @@ end:
     REG_SW_CLEAR_PROFILING(rwnx_hw, SW_PROF_RWNXDATAIND);
     return 0;
 }
-

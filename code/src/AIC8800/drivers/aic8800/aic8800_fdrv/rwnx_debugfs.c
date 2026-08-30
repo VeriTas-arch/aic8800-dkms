@@ -480,11 +480,18 @@ static ssize_t rwnx_dbgfs_acsinfo_read(struct file *file,
     #ifdef CONFIG_RWNX_FULLMAC
     struct wiphy *wiphy = priv->wiphy;
     #endif //CONFIG_RWNX_FULLMAC
-    char buf[(SCAN_CHANNEL_MAX + 1) * 43];
+    const size_t bufsz = (SCAN_CHANNEL_MAX + 1) * 43;
+    char *buf;
+    ssize_t read;
     int survey_cnt = 0;
     int len = 0;
     int band, chan_cnt;
 	int band_max = NL80211_BAND_5GHZ;
+
+    buf = kmalloc(bufsz, GFP_KERNEL);
+    if (!buf) {
+        return -ENOMEM;
+    }
 
 	if (priv->band_5g_support){
 		band_max = NL80211_BAND_5GHZ + 1;
@@ -492,7 +499,7 @@ static ssize_t rwnx_dbgfs_acsinfo_read(struct file *file,
 
     mutex_lock(&priv->dbgdump_elem.mutex);
 
-    len += scnprintf(buf, min_t(size_t, sizeof(buf) - 1, count),
+    len += scnprintf(buf, bufsz,
                      "FREQ    TIME(ms)    BUSY(ms)    NOISE(dBm)\n");
 
 
@@ -502,19 +509,28 @@ static ssize_t rwnx_dbgfs_acsinfo_read(struct file *file,
 	//for (band = NL80211_BAND_2GHZ; band < NL80211_BAND_5GHZ; band++) {
 	//#endif
 	for (band = NL80211_BAND_2GHZ; band < band_max; band++) {
+        if (!wiphy->bands[band])
+            continue;
+
         for (chan_cnt = 0; chan_cnt < wiphy->bands[band]->n_channels; chan_cnt++) {
-            struct rwnx_survey_info *p_survey_info = &priv->survey[survey_cnt];
-            struct ieee80211_channel *p_chan = &wiphy->bands[band]->channels[chan_cnt];
+            struct rwnx_survey_info *p_survey_info;
+            struct ieee80211_channel *p_chan;
+
+            if (survey_cnt >= ARRAY_SIZE(priv->survey))
+                goto out_unlock;
+
+            p_survey_info = &priv->survey[survey_cnt];
+            p_chan = &wiphy->bands[band]->channels[chan_cnt];
 
             if (p_survey_info->filled) {
-                len += scnprintf(&buf[len], min_t(size_t, sizeof(buf) - len - 1, count),
+                len += scnprintf(&buf[len], bufsz - len,
                                  "%d    %03d         %03d         %d\n",
                                  p_chan->center_freq,
                                  p_survey_info->chan_time_ms,
                                  p_survey_info->chan_time_busy_ms,
                                  p_survey_info->noise_dbm);
             } else {
-                len += scnprintf(&buf[len], min_t(size_t, sizeof(buf) -len -1, count),
+                len += scnprintf(&buf[len], bufsz - len,
                                  "%d    NOT AVAILABLE\n",
                                  p_chan->center_freq);
             }
@@ -523,9 +539,13 @@ static ssize_t rwnx_dbgfs_acsinfo_read(struct file *file,
         }
     }
 
+out_unlock:
     mutex_unlock(&priv->dbgdump_elem.mutex);
 
-    return simple_read_from_buffer(user_buf, count, ppos, buf, len);
+    read = simple_read_from_buffer(user_buf, count, ppos, buf, len);
+    kfree(buf);
+
+    return read;
 }
 
 DEBUGFS_READ_FILE_OPS(acsinfo);
@@ -1736,43 +1756,60 @@ static ssize_t rwnx_dbgfs_rc_fixed_rate_idx_write(struct file *file,
 {
     struct rwnx_sta *sta = NULL;
     struct rwnx_hw *priv = file->private_data;
-    u8 mac[6];
-    char buf[10];
-    int fixed_rate_idx = 1;
+    u8 mac[ETH_ALEN];
+    char buf[64];
 	unsigned int formatmod, mcs, nss, bwTx, gi;
     union rwnx_rate_ctrl_info rate_config;
     int error = 0;
-    size_t len = min_t(size_t, count, sizeof(buf) - 1);
+    size_t len;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
     /* Get the station index from MAC address */
-    sscanf(file->f_path.dentry->d_parent->d_iname, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
-            &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]);
-    if (mac == NULL)
-        return 0;
+    if (sscanf(file->f_path.dentry->d_parent->d_iname,
+               "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
+               &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]) != ETH_ALEN)
+        return -EINVAL;
     sta = rwnx_get_sta(priv, mac);
     if (sta == NULL)
         return 0;
 
     /* Get the content of the file */
+    if (!count || count >= sizeof(buf))
+        return -EINVAL;
+    len = count;
     if (copy_from_user(buf, user_buf, len))
         return -EFAULT;
     buf[len] = '\0';
-    //sscanf(buf, "%i\n", &fixed_rate_idx);
-	sscanf(buf, "%u %u %u %u %u",&formatmod, &mcs, &nss, &bwTx, &gi);
+    if (sscanf(buf, "%u %u %u %u %u", &formatmod, &mcs, &nss, &bwTx, &gi) != 5)
+        return -EINVAL;
+
+	if (bwTx > 3 || gi > 3 || nss > 7)
+		return -EINVAL;
+
+	switch (formatmod) {
+	case FORMATMOD_NON_HT:
+	case FORMATMOD_NON_HT_DUP_OFDM:
+		if (mcs > 0x7f)
+			return -EINVAL;
+		break;
+	case FORMATMOD_HT_MF:
+		if (mcs > 7 || nss > 3)
+			return -EINVAL;
+		break;
+	case FORMATMOD_VHT:
+	case FORMATMOD_HE_SU:
+	case FORMATMOD_HE_MU:
+		if (mcs > 15)
+			return -EINVAL;
+		break;
+	default:
+		return -EINVAL;
+	}
+
 	//printk("%u %u %u %u %u\n",formatmod, mcs, nss, bwTx, gi);
     /* Convert rate index into rate configuration */
-    if ((fixed_rate_idx < 0) || (fixed_rate_idx >= (N_CCK + N_OFDM + N_HT + N_VHT + N_HE_SU)))
-    {
-        // disable fixed rate
-        rate_config.value = (u32)-1;
-    }
-    else
-    {
-        //idx_to_rate_cfg(fixed_rate_idx, &rate_config, NULL);
-        idx_to_rate_cfg1(formatmod, mcs, nss, bwTx, gi, &rate_config, NULL);
-    }
+    idx_to_rate_cfg1(formatmod, mcs, nss, bwTx, gi, &rate_config, NULL);
 	/*union rwnx_rate_ctrl_info *r_cfg=&rate_config;
 	printk("formatModTx=%u mcsIndexTx=%u bwTx=%u giAndPreTypeTx=%u\n",r_cfg->formatModTx,r_cfg->mcsIndexTx,r_cfg->bwTx,r_cfg->giAndPreTypeTx);
 	printk("you wen ti");*/
@@ -2091,7 +2128,8 @@ static void rwnx_rc_stat_work(struct work_struct *ws)
             "Error while (un)registering debug entry for sta %d\n", sta_idx);
 }
 
-void _rwnx_dbgfs_rc_stat_write(struct rwnx_debugfs *rwnx_debugfs, uint8_t sta_idx)
+static void _rwnx_dbgfs_rc_stat_write(struct rwnx_debugfs *rwnx_debugfs,
+                                      uint8_t sta_idx)
 {
     uint8_t widx = rwnx_debugfs->rc_write;
     if (rwnx_debugfs->rc_sta[widx] != 0XFF) {
