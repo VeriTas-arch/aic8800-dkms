@@ -324,7 +324,7 @@ KDIR  ?= /lib/modules/$(shell uname -r)/build
 #KDIR ?= ~/D/Workspace/CyberQuantum/Linux/linux-4.15/
 PWD   ?= $(CURDIR)
 KVER ?= $(shell uname -r)
-MODDESTDIR ?= /lib/modules/$(KVER)/kernel/drivers/net/wireless/aic8800
+MODDESTDIR ?= /lib/modules/$(KVER)/updates/dkms
 ARCH ?= $(shell uname -m)
 CROSS_COMPILE ?=
 DEPMOD ?= depmod
@@ -334,14 +334,14 @@ endif
 all: modules
 modules:
 #	make -C $(KDIR) M=$(PWD) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) LLVM=1 LLVM_IAS=1 modules
-	make -C $(KDIR) M=$(PWD) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) modules
+	$(MAKE) -C $(KDIR) M=$(PWD) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) modules
 install:
 	mkdir -p $(MODDESTDIR)
 	install -p -m 644 $(MODULE_NAME).ko  $(MODDESTDIR)
 	$(DEPMOD) -a ${KVER}
 
 uninstall:
-	rm -rfv $(MODDESTDIR)/$(MODULE_NAME).ko
+	rm -fv $(MODDESTDIR)/$(MODULE_NAME).ko
 	rmdir $(MODDESTDIR) 2>/dev/null || true
 	$(DEPMOD) -a ${KVER}
 

@@ -551,85 +551,6 @@ out_unlock:
 
 DEBUGFS_READ_FILE_OPS(acsinfo);
 
-static ssize_t rwnx_dbgfs_fw_dbg_read(struct file *file,
-                                           char __user *user_buf,
-                                           size_t count, loff_t *ppos)
-{
-    char help[]="usage: [MOD:<ALL|KE|DBG|IPC|DMA|MM|TX|RX|PHY>]* "
-        "[DBG:<NONE|CRT|ERR|WRN|INF|VRB>]\n";
-
-    return simple_read_from_buffer(user_buf, count, ppos, help, sizeof(help));
-}
-
-
-static ssize_t rwnx_dbgfs_fw_dbg_write(struct file *file,
-                                            const char __user *user_buf,
-                                            size_t count, loff_t *ppos)
-{
-    struct rwnx_hw *priv = file->private_data;
-    char buf[32];
-    int idx = 0;
-    u32 mod = 0;
-    size_t len = min_t(size_t, count, sizeof(buf) - 1);
-
-    if (copy_from_user(buf, user_buf, len))
-        return -EFAULT;
-    buf[len] = '\0';
-
-#define RWNX_MOD_TOKEN(str, val)                                        \
-    if (strncmp(&buf[idx], str, sizeof(str) - 1 ) == 0) {               \
-        idx += sizeof(str) - 1;                                         \
-        mod |= val;                                                     \
-        continue;                                                       \
-    }
-
-#define RWNX_DBG_TOKEN(str, val)                                \
-    if (strncmp(&buf[idx], str, sizeof(str) - 1) == 0) {        \
-        idx += sizeof(str) - 1;                                 \
-        dbg = val;                                              \
-        goto dbg_done;                                          \
-    }
-
-    while ((idx + 4) < len) {
-        if (strncmp(&buf[idx], "MOD:", 4) == 0) {
-            idx += 4;
-            RWNX_MOD_TOKEN("ALL", 0xffffffff);
-            RWNX_MOD_TOKEN("KE",  BIT(0));
-            RWNX_MOD_TOKEN("DBG", BIT(1));
-            RWNX_MOD_TOKEN("IPC", BIT(2));
-            RWNX_MOD_TOKEN("DMA", BIT(3));
-            RWNX_MOD_TOKEN("MM",  BIT(4));
-            RWNX_MOD_TOKEN("TX",  BIT(5));
-            RWNX_MOD_TOKEN("RX",  BIT(6));
-            RWNX_MOD_TOKEN("PHY", BIT(7));
-            idx++;
-        } else if (strncmp(&buf[idx], "DBG:", 4) == 0) {
-            u32 dbg = 0;
-            idx += 4;
-            RWNX_DBG_TOKEN("NONE", 0);
-            RWNX_DBG_TOKEN("CRT",  1);
-            RWNX_DBG_TOKEN("ERR",  2);
-            RWNX_DBG_TOKEN("WRN",  3);
-            RWNX_DBG_TOKEN("INF",  4);
-            RWNX_DBG_TOKEN("VRB",  5);
-            idx++;
-            continue;
-          dbg_done:
-            rwnx_send_dbg_set_sev_filter_req(priv, dbg);
-        } else {
-            idx++;
-        }
-    }
-
-    if (mod) {
-        rwnx_send_dbg_set_mod_filter_req(priv, mod);
-    }
-
-    return count;
-}
-
-DEBUGFS_READ_WRITE_FILE_OPS(fw_dbg);
-
 static ssize_t rwnx_dbgfs_sys_stats_read(struct file *file,
                                          char __user *user_buf,
                                          size_t count, loff_t *ppos)
@@ -676,7 +597,7 @@ static ssize_t rwnx_dbgfs_runtime_stats_read(struct file *file,
 {
     struct rwnx_hw *priv = file->private_data;
     struct rwnx_runtime_stats *stats = &priv->runtime_stats;
-    const size_t bufsz = 1024;
+    const size_t bufsz = 2048;
     char *buf;
     int len;
     ssize_t read;
@@ -711,8 +632,26 @@ static ssize_t rwnx_dbgfs_runtime_stats_read(struct file *file,
                      "usb_rx_queue_overflows=%d\n",
                      atomic_read(&stats->usb_rx_queue_overflows));
     len += scnprintf(buf + len, bufsz - len,
+                     "usb_rx_completion_errors=%d\n",
+                     atomic_read(&stats->usb_rx_completion_errors));
+    len += scnprintf(buf + len, bufsz - len,
+                     "usb_rx_terminal_errors=%d\n",
+                     atomic_read(&stats->usb_rx_terminal_errors));
+    len += scnprintf(buf + len, bufsz - len,
+                     "usb_rx_short_frames=%d\n",
+                     atomic_read(&stats->usb_rx_short_frames));
+    len += scnprintf(buf + len, bufsz - len,
+                     "usb_rx_invalid_lengths=%d\n",
+                     atomic_read(&stats->usb_rx_invalid_lengths));
+    len += scnprintf(buf + len, bufsz - len,
                      "usb_tx_submit_failures=%d\n",
                      atomic_read(&stats->usb_tx_submit_failures));
+    len += scnprintf(buf + len, bufsz - len,
+                     "usb_tx_completion_errors=%d\n",
+                     atomic_read(&stats->usb_tx_completion_errors));
+    len += scnprintf(buf + len, bufsz - len,
+                     "usb_msg_tx_completion_errors=%d\n",
+                     atomic_read(&stats->usb_msg_tx_completion_errors));
     len += scnprintf(buf + len, bufsz - len,
                      "usb_tx_no_buffers=%d\n",
                      atomic_read(&stats->usb_tx_no_buffers));
@@ -725,6 +664,18 @@ static ssize_t rwnx_dbgfs_runtime_stats_read(struct file *file,
     len += scnprintf(buf + len, bufsz - len,
                      "usb_flow_wakes=%d\n",
                      atomic_read(&stats->usb_flow_wakes));
+    len += scnprintf(buf + len, bufsz - len,
+                     "fw_msg_invalid=%d\n",
+                     atomic_read(&stats->fw_msg_invalid));
+    len += scnprintf(buf + len, bufsz - len,
+                     "fw_log_drops=%d\n",
+                     atomic_read(&stats->fw_log_drops));
+    len += scnprintf(buf + len, bufsz - len,
+                     "amsdu_invalid=%d\n",
+                     atomic_read(&stats->amsdu_invalid));
+    len += scnprintf(buf + len, bufsz - len,
+                     "radiotap_invalid_rates=%d\n",
+                     atomic_read(&stats->radiotap_invalid_rates));
 
     read = simple_read_from_buffer(user_buf, count, ppos, buf, len);
     kfree(buf);
@@ -846,7 +797,7 @@ static ssize_t rwnx_dbgfs_noa_write(struct file *file,
 
     /* Read the written NOA information */
     if (sscanf(buf, "count=%d interval=%d duration=%d dyn=%d",
-               &noa_count, &interval, &duration, &dyn_noa) > 0) {
+               &noa_count, &interval, &duration, &dyn_noa) == 4) {
         /* Check if at least one VIF is configured as P2P GO */
         list_for_each_entry(rw_vif, &rw_hw->vifs, list) {
 #ifdef CONFIG_RWNX_FULLMAC
@@ -861,6 +812,8 @@ static ssize_t rwnx_dbgfs_noa_write(struct file *file,
                 break;
             }
         }
+    } else {
+        return -EINVAL;
     }
 
     return count;
@@ -1328,11 +1281,14 @@ static ssize_t rwnx_dbgfs_regdbg_write(struct file *file,
 
     	buf[len] = '\0';
 
-	if (sscanf(buf, "%x %x %x" , &oper, &addr, &val ) > 0)
-		printk("addr=%x, val=%x,oper=%d\n", addr, val, oper);
+	if (sscanf(buf, "%x %x %x", &oper, &addr, &val) != 3)
+		return -EINVAL;
+	printk("addr=%x, val=%x,oper=%d\n", addr, val, oper);
 
     	if(oper== 0) {
 		ret = rwnx_send_dbg_mem_read_req(priv, addr, &mem_read_cfm);
+		if (ret)
+			return ret;
         	printk("[0x%x] = [0x%x]\n", mem_read_cfm.memaddr, mem_read_cfm.memdata);
     	}
 

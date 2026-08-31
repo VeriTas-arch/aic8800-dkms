@@ -1957,7 +1957,23 @@ int aicwf_plat_patch_load_8800dc(struct rwnx_hw *rwnx_hw){
     int ret = 0;
 
 #ifndef ANDROID_PLATFORM
-        sprintf(aic_fw_path, "%s/%s", aic_fw_path, "aic8800DC");
+    {
+        static const char suffix[] = "/aic8800DC";
+        size_t path_len = strnlen(aic_fw_path, 200);
+        size_t suffix_len = sizeof(suffix) - 1;
+
+        if (path_len == 200)
+            return -ENAMETOOLONG;
+        if (path_len < suffix_len ||
+            memcmp(aic_fw_path + path_len - suffix_len,
+                   suffix, suffix_len)) {
+            if (path_len + suffix_len >= 200) {
+                AICWFDBG(LOGERROR, "Firmware path is too long\n");
+                return -ENAMETOOLONG;
+            }
+            memcpy(aic_fw_path + path_len, suffix, sizeof(suffix));
+        }
+    }
 #endif
     if (testmode == 0) {
 #if !defined(CONFIG_FPGA_VERIFICATION)

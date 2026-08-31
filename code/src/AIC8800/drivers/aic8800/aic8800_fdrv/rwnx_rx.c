@@ -327,13 +327,10 @@ static void rwnx_rx_data_skb_resend(struct rwnx_hw *rwnx_hw, struct rwnx_vif *rw
 {
 	struct sk_buff *rx_skb = skb;
 	//bool amsdu = rxhdr->flags_is_amsdu;
-	const struct ethhdr *eth;
 	struct sk_buff *skb_copy;
 
 	rx_skb->dev = rwnx_vif->ndev;
 	skb_reset_mac_header(rx_skb);
-	eth = eth_hdr(rx_skb);
-
     //printk("resend\n");
 	/* resend pkt on wireless interface */
 	/* always need to copy buffer when forward=0 to get enough headrom for tsdesc */
@@ -464,6 +461,13 @@ static bool rwnx_rx_data_skb(struct rwnx_hw *rwnx_hw, struct rwnx_vif *rwnx_vif,
 #endif
 
         count = skb_queue_len(&list);
+        if (unlikely(!count)) {
+            atomic_inc(&rwnx_hw->runtime_stats.amsdu_invalid);
+            rwnx_vif->net_stats.rx_dropped++;
+            AICWFDBG_RATELIMITED(LOGERROR,
+                                 "Dropped malformed empty A-MSDU\n");
+            return true;
+        }
         if (count > ARRAY_SIZE(rwnx_hw->stats.amsdus_rx))
             count = ARRAY_SIZE(rwnx_hw->stats.amsdus_rx);
         rwnx_hw->stats.amsdus_rx[count - 1]++;
@@ -914,7 +918,8 @@ static void rwnx_rx_add_rtap_hdr(struct rwnx_hw* rwnx_hw,
                                  u32 vend_it_present)
 {
     struct ieee80211_radiotap_header *rtap;
-    u8 *pos, rate_idx;
+    u8 *pos;
+    int rate_idx;
     __le32 *it_present;
     u32 it_present_val = 0;
     bool fec_coding = false;
@@ -1002,13 +1007,31 @@ static void rwnx_rx_add_rtap_hdr(struct rwnx_hw* rwnx_hw,
         aggregation = rxvect->ht.aggregation;
         *pos = 0;
     } else {
-        struct ieee80211_supported_band* band =
-                rwnx_hw->wiphy->bands[phy_info->phy_band];
+        struct ieee80211_supported_band *band = NULL;
+
+        if (phy_info->phy_band < NUM_NL80211_BANDS)
+            band = rwnx_hw->wiphy->bands[phy_info->phy_band];
         rtap->it_present |= cpu_to_le32(1 << IEEE80211_RADIOTAP_RATE);
-        BUG_ON((rate_idx = legrates_lut[rxvect->leg_rate]) == -1);
-        if (phy_info->phy_band == NL80211_BAND_5GHZ)
-            rate_idx -= 4;  /* rwnx_ratetable_5ghz[0].hw_value == 4 */
-        *pos = DIV_ROUND_UP(band->bitrates[rate_idx].bitrate, 5);
+        if (rxvect->leg_rate >= ARRAY_SIZE(legrates_lut) || !band ||
+            (rate_idx = legrates_lut[rxvect->leg_rate]) < 0) {
+            atomic_inc(&rwnx_hw->runtime_stats.radiotap_invalid_rates);
+            AICWFDBG_RATELIMITED(LOGERROR,
+                                 "Invalid legacy RX rate:%u band:%u\n",
+                                 rxvect->leg_rate, phy_info->phy_band);
+            *pos = 0;
+        } else {
+            if (phy_info->phy_band == NL80211_BAND_5GHZ)
+                rate_idx -= 4;
+            if (rate_idx < 0 || rate_idx >= band->n_bitrates) {
+                atomic_inc(&rwnx_hw->runtime_stats.radiotap_invalid_rates);
+                AICWFDBG_RATELIMITED(LOGERROR,
+                                     "Legacy RX rate index out of range:%d\n",
+                                     rate_idx);
+                *pos = 0;
+            } else {
+                *pos = DIV_ROUND_UP(band->bitrates[rate_idx].bitrate, 5);
+            }
+        }
     }
     pos++;
 
@@ -1368,7 +1391,6 @@ static int reord_flush_tid(struct aicwf_rx_priv *rx_priv, struct sk_buff *skb, u
     u8 found = 0;
     struct list_head *phead, *plist;
     struct recv_msdu *prframe;
-    int ret;
 
     if((rwnx_vif->wdev.iftype == NL80211_IFTYPE_STATION) || (rwnx_vif->wdev.iftype == NL80211_IFTYPE_P2P_CLIENT))
         mac = eh->h_dest;
@@ -1412,7 +1434,7 @@ static int reord_flush_tid(struct aicwf_rx_priv *rx_priv, struct sk_buff *skb, u
     preorder_ctrl->enable = false;
     spin_unlock_irqrestore(&preorder_ctrl->reord_list_lock, flags);
     if (timer_pending(&preorder_ctrl->reord_timer))
-        ret = del_timer_sync(&preorder_ctrl->reord_timer);
+        del_timer_sync(&preorder_ctrl->reord_timer);
     cancel_work_sync(&preorder_ctrl->reord_timer_work);
 
     return 0;
@@ -1423,7 +1445,6 @@ void reord_deinit_sta(struct aicwf_rx_priv* rx_priv, struct reord_ctrl_info *reo
     u8 i = 0;
     //unsigned long flags;
     struct reord_ctrl *preorder_ctrl = NULL;
-    int ret;
 
     if (rx_priv == NULL) {
         txrx_err("bad rx_priv!\n");
@@ -1438,7 +1459,7 @@ void reord_deinit_sta(struct aicwf_rx_priv* rx_priv, struct reord_ctrl_info *reo
 		if(preorder_ctrl->enable){
 			preorder_ctrl->enable = false;
 	        if (timer_pending(&preorder_ctrl->reord_timer)) {
-	            ret = del_timer_sync(&preorder_ctrl->reord_timer);
+	            del_timer_sync(&preorder_ctrl->reord_timer);
 	        }
 	        cancel_work_sync(&preorder_ctrl->reord_timer_work);
 		}

@@ -12,6 +12,7 @@
 - `code/scripts`: 只编译验证、DKMS 安装、刷新、清理与版本同步脚本
 - `code/src/AIC8800`: 驱动源码、固件与 udev 规则
 - `code/VERSION`: 仓库内统一版本号来源
+- `archive`: 上游历史安装包，仅作来源存档，不参与当前构建或安装
 
 ## 适用范围
 
@@ -45,6 +46,19 @@ chmod +x code/scripts/build-test.sh
 ./code/scripts/build-test.sh 6.8.0-xx-generic
 ```
 
+启用内核额外警告检查：
+
+```bash
+./code/scripts/build-test.sh --warnings 6.8.0-xx-generic
+```
+
+检查脚本语法、版本一致性、空白错误，并对所有 `/lib/modules/*/build`
+执行只编译矩阵：
+
+```bash
+./code/scripts/check.sh
+```
+
 ### 安装或刷新 DKMS
 
 1. 本机当前内核安装
@@ -76,10 +90,16 @@ chmod +x code/scripts/build-test.sh
 
 脚本行为说明：
 
+- 在任何 DKMS 或系统文件变更前执行只编译预检
 - 复制源码目录 `code/src/AIC8800/drivers/aic8800` 到 `/usr/src/aic8800fdrv-<version>/`
 - 同步 `dkms.conf` 中的 `PACKAGE_VERSION`
+- 安装前用 `SHA256SUMS` 校验仓库中的固件
 - 安装固件目录 `code/src/AIC8800/fw/aic8800DC` 到 `/lib/firmware/aic8800DC`
 - 安装 udev 规则 `code/src/AIC8800/aic.rules` 到 `/etc/udev/rules.d/aic.rules`
+- 只重新加载 udev 规则，不再对全系统设备执行无范围的 `udevadm trigger`；需要重新插拔 AIC 设备使规则生效
+
+`dkms-local-install.sh` 只重建指定内核，不再删除同版本在其他内核上的
+DKMS 状态。`dkms-clean-old-versions.sh --dry-run` 可先预览旧版本清理范围。
 
 ## 安装后验证
 
@@ -90,11 +110,11 @@ sudo modprobe aic8800_fdrv
 lsmod | grep -E "aic_load_fw|aic8800_fdrv"
 ```
 
-如果设备仍停留在 Aic MSC，可做一次安全热触发：
+如果设备仍停留在 Aic MSC，可重新加载规则并重新插拔设备：
 
 ```bash
 sudo udevadm control --reload
-sudo udevadm trigger
+# 重新插拔 AIC USB 设备后继续检查
 ls -l /dev/aicudisk
 sudo eject /dev/aicudisk
 sudo dmesg -w | grep -Ei "aic|usb|firmware|rwnx"
@@ -118,6 +138,30 @@ chmod +x code/scripts/sync-version.sh
 - `code/VERSION`
 - `code/src/AIC8800/drivers/aic8800/dkms.conf`
 - `code/src/DEBIAN/control`
+
+只检查三处版本是否一致：
+
+```bash
+./code/scripts/sync-version.sh --check
+```
+
+## 运行期诊断
+
+建议在异常出现后尽快采集。脚本只读系统状态，默认对常见 MAC、SSID 和
+IPv4 地址进行脱敏；以 root 运行才能读取 debugfs 和完整内核日志。
+
+```bash
+sudo ./code/scripts/collect-runtime-logs.sh --minutes 30 --output /tmp/aic8800-runtime.log
+```
+
+`runtime_stats` 是从模块初始化开始累计的计数，不会按采集窗口自动清零。
+重点比较异常前后两次快照：USB 提交/完成错误、终止状态、短帧或非法长度、
+固件消息非法、A-MSDU/monitor 元数据非法以及固件日志丢弃计数。计数保持为零
+是健康基线；非零不一定代表持续故障，应结合增量和同一时间段的内核日志判断。
+
+采集结果还包含启动 ID、源码提交与工作树状态、已加载模块和磁盘模块的
+`srcversion`/`vermagic`、USB 拓扑、接口统计、驱动计数以及 NetworkManager 日志，
+可用于区分驱动异常、USB 总线异常和上游网络问题。
 
 ## DKMS 自动重建回归用例
 

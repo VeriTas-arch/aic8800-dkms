@@ -81,7 +81,7 @@ ccflags-$(CONFIG_PLATFORM_UBUNTU) += -DCONFIG_PLATFORM_UBUNTU
 KDIR  ?= /lib/modules/$(shell uname -r)/build
 PWD   ?= $(shell pwd)
 KVER ?= $(shell uname -r)
-MODDESTDIR ?= /lib/modules/$(KVER)/kernel/drivers/net/wireless/aic8800
+MODDESTDIR ?= /lib/modules/$(KVER)/updates/dkms
 ARCH ?= $(shell uname -m)
 CROSS_COMPILE ?=
 endif
@@ -89,7 +89,7 @@ endif
 
 all: modules
 modules:
-	make -C $(KDIR) M=$(PWD) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) modules
+	$(MAKE) -C $(KDIR) M=$(PWD) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) modules
 
 install:
 	mkdir -p $(MODDESTDIR)
@@ -97,7 +97,7 @@ install:
 	/sbin/depmod -a ${KVER}
 
 uninstall:
-	rm -rfv $(MODDESTDIR)/$(MODULE_NAME).ko
+	rm -fv $(MODDESTDIR)/$(MODULE_NAME).ko
 	rmdir $(MODDESTDIR) 2>/dev/null || true
 	/sbin/depmod -a ${KVER}
 

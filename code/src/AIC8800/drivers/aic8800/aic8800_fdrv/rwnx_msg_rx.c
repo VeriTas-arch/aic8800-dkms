@@ -55,7 +55,7 @@ static int rwnx_freq_to_idx(struct rwnx_hw *rwnx_hw, int freq)
         }
     }
 
-    BUG_ON(1);
+    return -ENOENT;
 
 exit:
     // Channel has been found, return the index
@@ -205,7 +205,7 @@ static inline int rwnx_rx_tdls_peer_ps_ind(struct rwnx_hw *rwnx_hw,
 
 #ifdef CONFIG_RWNX_FULLMAC
     list_for_each_entry(rwnx_vif, &rwnx_hw->vifs, list) {
-        if (rwnx_vif->vif_index == vif_index) {
+        if (rwnx_vif->vif_index == vif_index && rwnx_vif->sta.tdls_sta) {
             rwnx_vif->sta.tdls_sta->tdls.ps_on = ps_on;
             // Update PS status for the TDLS station
             rwnx_ps_bh_enable(rwnx_hw, rwnx_vif->sta.tdls_sta, ps_on);
@@ -286,9 +286,11 @@ static inline int rwnx_rx_p2p_vif_ps_change_ind(struct rwnx_hw *rwnx_hw,
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
 #ifdef CONFIG_RWNX_FULLMAC
+    if (vif_idx < 0 || vif_idx >= ARRAY_SIZE(rwnx_hw->vif_table))
+        goto exit;
     vif_entry = rwnx_hw->vif_table[vif_idx];
 
-    if (vif_entry) {
+    if (vif_entry && vif_entry->ndev) {
         goto found_vif;
     }
 #endif /* CONFIG_RWNX_FULLMAC */
@@ -324,8 +326,12 @@ static inline int rwnx_rx_channel_survey_ind(struct rwnx_hw *rwnx_hw,
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
-    if (idx >  ARRAY_SIZE(rwnx_hw->survey))
+    if (idx < 0 || idx >= ARRAY_SIZE(rwnx_hw->survey)) {
+        AICWFDBG_RATELIMITED(LOGERROR,
+                             "Ignored survey for unknown frequency:%u\n",
+                             ind->freq);
         return 0;
+    }
 
     rwnx_survey = &rwnx_hw->survey[idx];
 
@@ -363,8 +369,10 @@ static inline int rwnx_rx_rssi_status_ind(struct rwnx_hw *rwnx_hw,
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
 #ifdef CONFIG_RWNX_FULLMAC
+    if (vif_idx < 0 || vif_idx >= ARRAY_SIZE(rwnx_hw->vif_table))
+        return 0;
     vif_entry = rwnx_hw->vif_table[vif_idx];
-    if (vif_entry) {
+    if (vif_entry && vif_entry->ndev) {
         cfg80211_cqm_rssi_notify(vif_entry->ndev,
                                  rssi_status ? NL80211_CQM_RSSI_THRESHOLD_EVENT_LOW :
                                                NL80211_CQM_RSSI_THRESHOLD_EVENT_HIGH,
@@ -386,6 +394,8 @@ static inline int rwnx_rx_pktloss_notify_ind(struct rwnx_hw *rwnx_hw,
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
+    if (vif_idx < 0 || vif_idx >= ARRAY_SIZE(rwnx_hw->vif_table))
+        return 0;
     vif_entry = rwnx_hw->vif_table[vif_idx];
     if (vif_entry) {
         cfg80211_cqm_pktloss_notify(vif_entry->ndev, (const u8 *)ind->mac_addr.array,
@@ -521,24 +531,26 @@ static inline int rwnx_rx_ps_change_ind(struct rwnx_hw *rwnx_hw,
                                         struct ipc_e2a_msg *msg)
 {
     struct mm_ps_change_ind *ind = (struct mm_ps_change_ind *)msg->param;
-    struct rwnx_sta *sta = &rwnx_hw->sta_table[ind->sta_idx];
+    struct rwnx_sta *sta;
+    struct rwnx_vif *vif;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
-#if 1//2022-01-15 add for rwnx_hw->vif_table[sta->vif_idx] if null when rwnx_close
-	if (!rwnx_hw->vif_table[sta->vif_idx]){
-        wiphy_err(rwnx_hw->wiphy, "rwnx_hw->vif_table[sta->vif_idx] is null\n");
-		return 0;
-	}
-#endif
-
-    if (ind->sta_idx >= (NX_REMOTE_STA_MAX + NX_VIRT_DEV_MAX)) {
+    if (ind->sta_idx >= ARRAY_SIZE(rwnx_hw->sta_table)) {
         wiphy_err(rwnx_hw->wiphy, "Invalid sta index reported by fw %d\n",
                   ind->sta_idx);
         return 1;
     }
 
-    netdev_dbg(rwnx_hw->vif_table[sta->vif_idx]->ndev,
+    sta = &rwnx_hw->sta_table[ind->sta_idx];
+    if (sta->vif_idx >= ARRAY_SIZE(rwnx_hw->vif_table) ||
+        !(vif = rwnx_hw->vif_table[sta->vif_idx]) || !vif->ndev) {
+        wiphy_err(rwnx_hw->wiphy, "Invalid vif index reported for sta %d\n",
+                  ind->sta_idx);
+        return 1;
+    }
+
+    netdev_dbg(vif->ndev,
                "Sta %d, change PS mode to %s", sta->sta_idx,
                ind->ps_state ? "ON" : "OFF");
 
@@ -547,7 +559,7 @@ static inline int rwnx_rx_ps_change_ind(struct rwnx_hw *rwnx_hw,
     } else if (rwnx_hw->adding_sta) {
         sta->ps.active = ind->ps_state ? true : false;
     } else {
-        netdev_err(rwnx_hw->vif_table[sta->vif_idx]->ndev,
+        netdev_err(vif->ndev,
                    "Ignore PS mode change on invalid sta\n");
     }
 
@@ -561,11 +573,19 @@ static inline int rwnx_rx_traffic_req_ind(struct rwnx_hw *rwnx_hw,
                                           struct ipc_e2a_msg *msg)
 {
     struct mm_traffic_req_ind *ind = (struct mm_traffic_req_ind *)msg->param;
-    struct rwnx_sta *sta = &rwnx_hw->sta_table[ind->sta_idx];
+    struct rwnx_sta *sta;
+    struct rwnx_vif *vif;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
-    netdev_dbg(rwnx_hw->vif_table[sta->vif_idx]->ndev,
+    if (ind->sta_idx >= ARRAY_SIZE(rwnx_hw->sta_table))
+        return 1;
+    sta = &rwnx_hw->sta_table[ind->sta_idx];
+    if (sta->vif_idx >= ARRAY_SIZE(rwnx_hw->vif_table) ||
+        !(vif = rwnx_hw->vif_table[sta->vif_idx]) || !vif->ndev)
+        return 1;
+
+    netdev_dbg(vif->ndev,
                "Sta %d, asked for %d pkt", sta->sta_idx, ind->pkt_cnt);
 
     rwnx_ps_bh_traffic_req(rwnx_hw, sta, ind->pkt_cnt,
@@ -664,10 +684,9 @@ static inline int rwnx_rx_scanu_result_ind(struct rwnx_hw *rwnx_hw,
     struct ieee80211_channel *chan;
     struct scanu_result_ind *ind = (struct scanu_result_ind *)msg->param;
     struct ieee80211_mgmt *mgmt = (struct ieee80211_mgmt *)ind->payload;
-
-	const u8 *ie = mgmt->u.beacon.variable;
-	char *ssid = NULL;
-	int ssid_len = 0;
+    const u8 *ssid_ie;
+    const size_t fixed_len = offsetof(struct ieee80211_mgmt,
+                                      u.beacon.variable);
 	int freq = 0;
 
 #ifdef CONFIG_USE_WIRELESS_EXT
@@ -676,6 +695,14 @@ static inline int rwnx_rx_scanu_result_ind(struct rwnx_hw *rwnx_hw,
 
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
+
+    if (ind->length < fixed_len) {
+        atomic_inc(&rwnx_hw->runtime_stats.fw_msg_invalid);
+        AICWFDBG_RATELIMITED(LOGERROR,
+                             "Dropped short scan result length:%u\n",
+                             ind->length);
+        return 0;
+    }
 
     chan = ieee80211_get_channel(rwnx_hw->wiphy, ind->center_freq);
 
@@ -695,19 +722,15 @@ static inline int rwnx_rx_scanu_result_ind(struct rwnx_hw *rwnx_hw,
                                         (struct ieee80211_mgmt *)ind->payload,
                                         ind->length, ind->rssi * 100, GFP_ATOMIC);
 
-		//print scan result info start
-		ssid_len = ie[1];
-		ssid = (char *)kmalloc(sizeof(char)* (ssid_len + 1), GFP_ATOMIC);
-		memset(ssid, 0, ssid_len + 1);
-		memcpy(ssid, &ie[2], ssid_len);
+		ssid_ie = cfg80211_find_ie(WLAN_EID_SSID,
+                                      mgmt->u.beacon.variable,
+                                      ind->length - fixed_len);
 		freq = ind->center_freq;
-		AICWFDBG(LOGDEBUG, "%s %02x:%02x:%02x:%02x:%02x:%02x ssid:%s freq:%d timestamp:%ld, %d\r\n", __func__,
-			bss->bssid[0],bss->bssid[1],bss->bssid[2],
-			bss->bssid[3],bss->bssid[4],bss->bssid[5],
-			ssid, freq, (long)mgmt->u.probe_resp.timestamp, ind->rssi);
-		kfree(ssid);
-		ssid = NULL;
-		//print scan result info end
+		AICWFDBG(LOGDEBUG, "%s %pM ssid:%.*s freq:%d timestamp:%lld, %d\r\n",
+                 __func__, mgmt->bssid,
+                 ssid_ie ? (int)ssid_ie[1] : 0,
+                 ssid_ie ? (const char *)&ssid_ie[2] : "",
+                 freq, (long long)mgmt->u.probe_resp.timestamp, ind->rssi);
 
 #ifdef CONFIG_USE_WIRELESS_EXT
 		if(rwnx_hw->wext_scan){
@@ -751,10 +774,15 @@ static inline int rwnx_rx_me_tkip_mic_failure_ind(struct rwnx_hw *rwnx_hw,
                                                   struct ipc_e2a_msg *msg)
 {
     struct me_tkip_mic_failure_ind *ind = (struct me_tkip_mic_failure_ind *)msg->param;
-    struct rwnx_vif *rwnx_vif = rwnx_hw->vif_table[ind->vif_idx];
-    struct net_device *dev = rwnx_vif->ndev;
+    struct rwnx_vif *rwnx_vif;
+    struct net_device *dev;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
+
+    if (ind->vif_idx >= ARRAY_SIZE(rwnx_hw->vif_table) ||
+        !(rwnx_vif = rwnx_hw->vif_table[ind->vif_idx]) ||
+        !(dev = rwnx_vif->ndev))
+        return 1;
 
     cfg80211_michael_mic_failure(dev, (u8 *)&ind->addr, (ind->ga?NL80211_KEYTYPE_GROUP:
                                  NL80211_KEYTYPE_PAIRWISE), ind->keyid,
@@ -770,6 +798,9 @@ static inline int rwnx_rx_me_tx_credits_update_ind(struct rwnx_hw *rwnx_hw,
     struct me_tx_credits_update_ind *ind = (struct me_tx_credits_update_ind *)msg->param;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
+
+    if (ind->sta_idx >= ARRAY_SIZE(rwnx_hw->sta_table))
+        return 1;
 
     rwnx_txq_credit_update(rwnx_hw, ind->sta_idx, ind->tid, ind->credits);
 
@@ -1418,7 +1449,7 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
-    if (ind->vif_idx >= (NX_VIRT_DEV_MAX + NX_REMOTE_STA_MAX)) {
+    if (ind->vif_idx >= ARRAY_SIZE(rwnx_hw->vif_table)) {
         AICWFDBG(LOGERROR, "%s invalid vif idx:%u\r\n",
                  __func__, ind->vif_idx);
         return 0;
@@ -1497,7 +1528,7 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
     }
 
     if (ind->status_code == 0) {
-        if (ind->ap_idx >= (NX_REMOTE_STA_MAX + NX_VIRT_DEV_MAX)) {
+        if (ind->ap_idx >= ARRAY_SIZE(rwnx_hw->sta_table)) {
             AICWFDBG(LOGERROR, "conn_ind evt:%u invalid ap_idx:%u\r\n",
                      evt_id, ind->ap_idx);
             malformed_success = true;
@@ -1664,7 +1695,9 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
 #endif
 
 #ifdef CONFIG_RWNX_MON_DATA
-    if (rwnx_hw->monitor_vif != RWNX_INVALID_VIF) {
+    if (rwnx_hw->monitor_vif != RWNX_INVALID_VIF &&
+        rwnx_hw->monitor_vif < ARRAY_SIZE(rwnx_hw->vif_table) &&
+        rwnx_hw->vif_table[rwnx_hw->monitor_vif]) {
         struct rwnx_vif *rwnx_mon_vif =
             rwnx_hw->vif_table[rwnx_hw->monitor_vif];
         rwnx_chanctx_unlink(rwnx_mon_vif);
@@ -1853,7 +1886,7 @@ static inline int rwnx_rx_sm_disconnect_ind(struct rwnx_hw *rwnx_hw,
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
-    if (ind->vif_idx >= (NX_VIRT_DEV_MAX + NX_REMOTE_STA_MAX)) {
+    if (ind->vif_idx >= ARRAY_SIZE(rwnx_hw->vif_table)) {
         AICWFDBG(LOGERROR, "%s invalid vif idx:%u\r\n",
                  __func__, ind->vif_idx);
         return 0;
@@ -2007,23 +2040,33 @@ static inline int rwnx_rx_sm_external_auth_required_ind(struct rwnx_hw *rwnx_hw,
 {
     struct sm_external_auth_required_ind *ind =
         (struct sm_external_auth_required_ind *)msg->param;
-    struct rwnx_vif *rwnx_vif = rwnx_hw->vif_table[ind->vif_idx];
+    struct rwnx_vif *rwnx_vif;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 17, 0) || defined(CONFIG_WPA3_FOR_OLD_KERNEL)
-    struct net_device *dev = rwnx_vif->ndev;
+    struct net_device *dev;
     struct cfg80211_external_auth_params params;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
+    if (ind->vif_idx >= ARRAY_SIZE(rwnx_hw->vif_table) ||
+        !(rwnx_vif = rwnx_hw->vif_table[ind->vif_idx]) ||
+        !(dev = rwnx_vif->ndev) || !rwnx_vif->up ||
+        RWNX_VIF_TYPE(rwnx_vif) != NL80211_IFTYPE_STATION) {
+        wiphy_err(rwnx_hw->wiphy,
+                  "Invalid external auth indication on vif %u\n",
+                  ind->vif_idx);
+        return 0;
+    }
+
+    memset(&params, 0, sizeof(params));
     params.action = NL80211_EXTERNAL_AUTH_START;
     memcpy(params.bssid, ind->bssid.array, ETH_ALEN);
-    params.ssid.ssid_len = ind->ssid.length;
+    params.ssid.ssid_len = min_t(size_t, ind->ssid.length,
+                                 sizeof(params.ssid.ssid));
     memcpy(params.ssid.ssid, ind->ssid.array,
-           min_t(size_t, ind->ssid.length, sizeof(params.ssid.ssid)));
+           params.ssid.ssid_len);
     params.key_mgmt_suite = ind->akm;
 
-    if ((ind->vif_idx > NX_VIRT_DEV_MAX) || !rwnx_vif->up ||
-        (RWNX_VIF_TYPE(rwnx_vif) != NL80211_IFTYPE_STATION) ||
-        cfg80211_external_auth_request(dev, &params, GFP_ATOMIC)) {
+    if (cfg80211_external_auth_request(dev, &params, GFP_ATOMIC)) {
         wiphy_err(rwnx_hw->wiphy, "Failed to start external auth on vif %d",
                   ind->vif_idx);
         rwnx_send_sm_external_auth_required_rsp(rwnx_hw, rwnx_vif,
@@ -2033,6 +2076,9 @@ static inline int rwnx_rx_sm_external_auth_required_ind(struct rwnx_hw *rwnx_hw,
 
     rwnx_external_auth_enable(rwnx_vif);
 #else
+    if (ind->vif_idx >= ARRAY_SIZE(rwnx_hw->vif_table) ||
+        !(rwnx_vif = rwnx_hw->vif_table[ind->vif_idx]))
+        return 0;
     rwnx_send_sm_external_auth_required_rsp(rwnx_hw, rwnx_vif,
                                             WLAN_STATUS_UNSPECIFIED_FAILURE);
 #endif
@@ -2045,9 +2091,13 @@ static inline int rwnx_rx_mesh_path_create_cfm(struct rwnx_hw *rwnx_hw,
                                                struct ipc_e2a_msg *msg)
 {
     struct mesh_path_create_cfm *cfm = (struct mesh_path_create_cfm *)msg->param;
-    struct rwnx_vif *rwnx_vif = rwnx_hw->vif_table[cfm->vif_idx];
+    struct rwnx_vif *rwnx_vif;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
+
+    if (cfm->vif_idx >= ARRAY_SIZE(rwnx_hw->vif_table))
+        return 1;
+    rwnx_vif = rwnx_hw->vif_table[cfm->vif_idx];
 
     /* Check we well have a Mesh Point Interface */
     if (rwnx_vif && (RWNX_VIF_TYPE(rwnx_vif) == NL80211_IFTYPE_MESH_POINT)) {
@@ -2062,14 +2112,19 @@ static inline int rwnx_rx_mesh_peer_update_ind(struct rwnx_hw *rwnx_hw,
                                                struct ipc_e2a_msg *msg)
 {
     struct mesh_peer_update_ind *ind = (struct mesh_peer_update_ind *)msg->param;
-    struct rwnx_vif *rwnx_vif = rwnx_hw->vif_table[ind->vif_idx];
-    struct rwnx_sta *rwnx_sta = &rwnx_hw->sta_table[ind->sta_idx];
+    struct rwnx_vif *rwnx_vif;
+    struct rwnx_sta *rwnx_sta;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
-    if ((ind->vif_idx >= (NX_VIRT_DEV_MAX + NX_REMOTE_STA_MAX)) ||
-        (rwnx_vif && (RWNX_VIF_TYPE(rwnx_vif) != NL80211_IFTYPE_MESH_POINT)) ||
-        (ind->sta_idx >= NX_REMOTE_STA_MAX))
+    if (ind->vif_idx >= ARRAY_SIZE(rwnx_hw->vif_table) ||
+        ind->sta_idx >= ARRAY_SIZE(rwnx_hw->sta_table))
+        return 1;
+
+    rwnx_vif = rwnx_hw->vif_table[ind->vif_idx];
+    rwnx_sta = &rwnx_hw->sta_table[ind->sta_idx];
+    if (!rwnx_vif ||
+        RWNX_VIF_TYPE(rwnx_vif) != NL80211_IFTYPE_MESH_POINT)
         return 1;
 
     /* Check we well have a Mesh Point Interface */
@@ -2162,17 +2217,22 @@ static inline int rwnx_rx_mesh_path_update_ind(struct rwnx_hw *rwnx_hw,
                                                struct ipc_e2a_msg *msg)
 {
     struct mesh_path_update_ind *ind = (struct mesh_path_update_ind *)msg->param;
-    struct rwnx_vif *rwnx_vif = rwnx_hw->vif_table[ind->vif_idx];
+    struct rwnx_vif *rwnx_vif;
     struct rwnx_mesh_path *mesh_path;
     bool found = false;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
-    if (ind->vif_idx >= (NX_VIRT_DEV_MAX + NX_REMOTE_STA_MAX))
+    if (ind->vif_idx >= ARRAY_SIZE(rwnx_hw->vif_table))
         return 1;
 
+    rwnx_vif = rwnx_hw->vif_table[ind->vif_idx];
     if (!rwnx_vif || (RWNX_VIF_TYPE(rwnx_vif) != NL80211_IFTYPE_MESH_POINT))
         return 0;
+
+    if (!ind->delete &&
+        ind->nhop_sta_idx >= ARRAY_SIZE(rwnx_hw->sta_table))
+        return 1;
 
     /* Look for path with provided target address */
     list_for_each_entry(mesh_path, &rwnx_vif->ap.mpath_list, list) {
@@ -2229,15 +2289,16 @@ static inline int rwnx_rx_mesh_proxy_update_ind(struct rwnx_hw *rwnx_hw,
                                                struct ipc_e2a_msg *msg)
 {
     struct mesh_proxy_update_ind *ind = (struct mesh_proxy_update_ind *)msg->param;
-    struct rwnx_vif *rwnx_vif = rwnx_hw->vif_table[ind->vif_idx];
+    struct rwnx_vif *rwnx_vif;
     struct rwnx_mesh_proxy *mesh_proxy;
     bool found = false;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
-    if (ind->vif_idx >= (NX_VIRT_DEV_MAX + NX_REMOTE_STA_MAX))
+    if (ind->vif_idx >= ARRAY_SIZE(rwnx_hw->vif_table))
         return 1;
 
+    rwnx_vif = rwnx_hw->vif_table[ind->vif_idx];
     if (!rwnx_vif || (RWNX_VIF_TYPE(rwnx_vif) != NL80211_IFTYPE_MESH_POINT))
         return 0;
 
@@ -2352,32 +2413,166 @@ static msg_cb_fct tdls_hdlrs[MSG_I(TDLS_MAX)] = {
     [MSG_I(TDLS_PEER_PS_IND)] = rwnx_rx_tdls_peer_ps_ind,
 };
 
-static msg_cb_fct *msg_hdlrs[] = {
-    [TASK_MM]    = mm_hdlrs,
-    [TASK_DBG]   = dbg_hdlrs,
+static msg_cb_fct rwnx_rx_msg_handler_get(u16 id, bool *valid_id)
+{
+    unsigned int index = MSG_I(id);
+
+    *valid_id = true;
+    switch (MSG_T(id)) {
+    case TASK_MM:
+        if (index < ARRAY_SIZE(mm_hdlrs))
+            return mm_hdlrs[index];
+        break;
+    case TASK_DBG:
+        if (index < ARRAY_SIZE(dbg_hdlrs))
+            return dbg_hdlrs[index];
+        break;
+    case TASK_TDLS:
+        if (index < ARRAY_SIZE(tdls_hdlrs))
+            return tdls_hdlrs[index];
+        break;
 #ifdef CONFIG_RWNX_FULLMAC
-    [TASK_TDLS]  = tdls_hdlrs,
-    [TASK_SCANU] = scan_hdlrs,
-    [TASK_ME]    = me_hdlrs,
-    [TASK_SM]    = sm_hdlrs,
-    [TASK_APM]   = apm_hdlrs,
-    [TASK_MESH]  = mesh_hdlrs,
-#endif /* CONFIG_RWNX_FULLMAC */
-};
+    case TASK_SCANU:
+        if (index < ARRAY_SIZE(scan_hdlrs))
+            return scan_hdlrs[index];
+        break;
+    case TASK_ME:
+        if (index < ARRAY_SIZE(me_hdlrs))
+            return me_hdlrs[index];
+        break;
+    case TASK_SM:
+        if (index < ARRAY_SIZE(sm_hdlrs))
+            return sm_hdlrs[index];
+        break;
+    case TASK_APM:
+        if (index < ARRAY_SIZE(apm_hdlrs))
+            return apm_hdlrs[index];
+        break;
+    case TASK_MESH:
+        if (index < ARRAY_SIZE(mesh_hdlrs))
+            return mesh_hdlrs[index];
+        break;
+#endif
+    default:
+        break;
+    }
+
+    *valid_id = false;
+    return NULL;
+}
+
+static size_t rwnx_rx_msg_min_param_len(u16 id)
+{
+    switch (id) {
+    case MM_CHANNEL_SWITCH_IND:
+        return sizeof(struct mm_channel_switch_ind);
+    case MM_CHANNEL_PRE_SWITCH_IND:
+        return sizeof(struct mm_channel_pre_switch_ind);
+    case MM_PS_CHANGE_IND:
+        return sizeof(struct mm_ps_change_ind);
+    case MM_TRAFFIC_REQ_IND:
+        return sizeof(struct mm_traffic_req_ind);
+    case MM_P2P_VIF_PS_CHANGE_IND:
+        return sizeof(struct mm_p2p_vif_ps_change_ind);
+    case MM_CSA_COUNTER_IND:
+        return sizeof(struct mm_csa_counter_ind);
+    case MM_CSA_FINISH_IND:
+        return sizeof(struct mm_csa_finish_ind);
+    case MM_CSA_TRAFFIC_IND:
+        return sizeof(struct mm_csa_traffic_ind);
+    case MM_CHANNEL_SURVEY_IND:
+        return sizeof(struct mm_channel_survey_ind);
+    case MM_RSSI_STATUS_IND:
+        return sizeof(struct mm_rssi_status_ind);
+    case MM_PKTLOSS_IND:
+        return sizeof(struct mm_pktloss_ind);
+    case MM_APM_STALOSS_IND:
+        return sizeof(struct mm_apm_staloss_ind);
+    case SCANU_RESULT_IND:
+        return offsetof(struct scanu_result_ind, payload);
+    case ME_TKIP_MIC_FAILURE_IND:
+        return sizeof(struct me_tkip_mic_failure_ind);
+    case ME_TX_CREDITS_UPDATE_IND:
+        return sizeof(struct me_tx_credits_update_ind);
+    case SM_CONNECT_IND:
+        return sizeof(struct sm_connect_ind);
+    case SM_DISCONNECT_IND:
+        return sizeof(struct sm_disconnect_ind);
+    case SM_EXTERNAL_AUTH_REQUIRED_IND:
+        return sizeof(struct sm_external_auth_required_ind);
+    case MESH_PATH_CREATE_CFM:
+        return sizeof(struct mesh_path_create_cfm);
+    case MESH_PEER_UPDATE_IND:
+        return sizeof(struct mesh_peer_update_ind);
+    case MESH_PATH_UPDATE_IND:
+        return sizeof(struct mesh_path_update_ind);
+    case MESH_PROXY_UPDATE_IND:
+        return sizeof(struct mesh_proxy_update_ind);
+    case TDLS_CHAN_SWITCH_BASE_IND:
+        return sizeof(struct tdls_chan_switch_base_ind);
+    case TDLS_PEER_PS_IND:
+        return sizeof(struct tdls_peer_ps_ind);
+    default:
+        return 0;
+    }
+}
 
 /**
  *
  */
-void rwnx_rx_handle_msg(struct rwnx_hw *rwnx_hw, struct ipc_e2a_msg *msg)
+void rwnx_rx_handle_msg(struct rwnx_hw *rwnx_hw, struct ipc_e2a_msg *msg,
+                        size_t msg_len)
 {
+    const size_t header_len = offsetof(struct ipc_e2a_msg, param);
+    msg_cb_fct handler;
+    size_t min_param_len;
+    bool valid_id;
+
 	//printk("%s(%d) MSG_T(msg->id):%d MSG_I(msg->id):%d cmd:%s\r\n", __func__,
 	//	msg->id,
 	//	MSG_T(msg->id),
 	//	MSG_I(msg->id),
 	//	rwnx_id2str[MSG_T(msg->id)][MSG_I(msg->id)]);
 
-    rwnx_hw->cmd_mgr->msgind(rwnx_hw->cmd_mgr, msg,
-                            msg_hdlrs[MSG_T(msg->id)][MSG_I(msg->id)]);
+    if (!rwnx_hw || !msg || msg_len < header_len) {
+        if (rwnx_hw)
+            atomic_inc(&rwnx_hw->runtime_stats.fw_msg_invalid);
+        AICWFDBG_RATELIMITED(LOGERROR,
+                             "Dropped short firmware message len:%zu\n",
+                             msg_len);
+        return;
+    }
+
+    handler = rwnx_rx_msg_handler_get(msg->id, &valid_id);
+    min_param_len = rwnx_rx_msg_min_param_len(msg->id);
+    if (!valid_id || msg->param_len > sizeof(msg->param) ||
+        msg->param_len > msg_len - header_len ||
+        msg->param_len < min_param_len) {
+        atomic_inc(&rwnx_hw->runtime_stats.fw_msg_invalid);
+        AICWFDBG_RATELIMITED(LOGERROR,
+                             "Dropped invalid firmware message id:0x%x task:%u index:%u param:%u available:%zu min:%zu\n",
+                             msg->id, MSG_T(msg->id), MSG_I(msg->id),
+                             msg->param_len, msg_len - header_len,
+                             min_param_len);
+        return;
+    }
+
+    if (msg->id == SCANU_RESULT_IND) {
+        struct scanu_result_ind *ind =
+            (struct scanu_result_ind *)msg->param;
+        size_t payload_len = msg->param_len -
+                             offsetof(struct scanu_result_ind, payload);
+
+        if (ind->length > payload_len) {
+            atomic_inc(&rwnx_hw->runtime_stats.fw_msg_invalid);
+            AICWFDBG_RATELIMITED(LOGERROR,
+                                 "Dropped truncated scan result frame:%u available:%zu\n",
+                                 ind->length, payload_len);
+            return;
+        }
+    }
+
+    rwnx_hw->cmd_mgr->msgind(rwnx_hw->cmd_mgr, msg, handler);
 }
 
 void rwnx_rx_handle_print(struct rwnx_hw *rwnx_hw, u8 *msg, u32 len)
@@ -2385,18 +2580,27 @@ void rwnx_rx_handle_print(struct rwnx_hw *rwnx_hw, u8 *msg, u32 len)
     u8 *data_end = NULL;
     (void)data_end;
 
+    if (!msg || !len)
+        return;
+
     if (!rwnx_hw || !rwnx_hw->fwlog_en) {
-        pr_err("FWLOG-OVFL: %s", msg);
+        pr_err("FWLOG-OVFL: %.*s", (int)len, msg);
         return;
     }
 
-    printk("FWLOG: %s", msg);
+    printk("FWLOG: %.*s", (int)len, msg);
 
 #ifdef CONFIG_RWNX_DEBUGFS
     data_end = rwnx_hw->debugfs.fw_log.buf.dataend;
 
     if (!rwnx_hw->debugfs.fw_log.buf.data)
         return ;
+
+    if (len > FW_LOG_SIZE) {
+        atomic_inc(&rwnx_hw->runtime_stats.fw_log_drops);
+        msg += len - FW_LOG_SIZE;
+        len = FW_LOG_SIZE;
+    }
 
     //printk("end=%lx, len=%d\n", (unsigned long)rwnx_hw->debugfs.fw_log.buf.end, len);
 

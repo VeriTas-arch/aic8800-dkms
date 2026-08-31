@@ -11,6 +11,7 @@ DEBIAN_CONTROL_FILE="$REPO_ROOT/src/DEBIAN/control"
 
 usage() {
     echo "Usage: $0 <new-version>"
+    echo "       $0 --check"
     echo "Example: $0 1.0.7"
 }
 
@@ -19,9 +20,15 @@ if [[ $# -ne 1 ]]; then
     exit 1
 fi
 
-NEW_VERSION="$(printf '%s' "$1" | tr -d '[:space:]')"
+MODE=write
+if [[ "$1" == "--check" ]]; then
+    MODE=check
+    NEW_VERSION=""
+else
+    NEW_VERSION=$1
+fi
 
-if [[ ! "$NEW_VERSION" =~ ^[0-9]+(\.[0-9]+)*([.-][0-9A-Za-z]+)*$ ]]; then
+if [[ "$MODE" == write && ! "$NEW_VERSION" =~ ^[0-9]+(\.[0-9]+)*([.-][0-9A-Za-z]+)*$ ]]; then
     error "invalid version format: $NEW_VERSION"
     error "expected something like: 1.0.7 or 1.0.7-rc1"
     exit 1
@@ -34,7 +41,24 @@ for file in "$VERSION_FILE" "$DKMS_CONF_FILE" "$DEBIAN_CONTROL_FILE"; do
     fi
 done
 
-CURRENT_VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
+CURRENT_VERSION="$(<"$VERSION_FILE")"
+DKMS_VERSION="$(sed -n -E 's/^PACKAGE_VERSION="([^"]+)"$/\1/p' "$DKMS_CONF_FILE")"
+DEBIAN_VERSION="$(sed -n -E 's/^Version:[[:space:]]+([^[:space:]]+)[[:space:]]*$/\1/p' "$DEBIAN_CONTROL_FILE")"
+
+if [[ ! "$CURRENT_VERSION" =~ ^[0-9]+(\.[0-9]+)*([.-][0-9A-Za-z]+)*$ ]]; then
+    error "invalid VERSION content: ${CURRENT_VERSION:-<empty>}"
+    exit 1
+fi
+
+if [[ "$MODE" == check ]]; then
+    if [[ "$CURRENT_VERSION" != "$DKMS_VERSION" ||
+          "$CURRENT_VERSION" != "$DEBIAN_VERSION" ]]; then
+        error "version mismatch: VERSION=$CURRENT_VERSION dkms.conf=${DKMS_VERSION:-<missing>} control=${DEBIAN_VERSION:-<missing>}"
+        exit 1
+    fi
+    echo "[OK] Version metadata is synchronized: $CURRENT_VERSION"
+    exit 0
+fi
 
 info "Current version: ${CURRENT_VERSION:-<empty>}"
 info "Target  version: $NEW_VERSION"

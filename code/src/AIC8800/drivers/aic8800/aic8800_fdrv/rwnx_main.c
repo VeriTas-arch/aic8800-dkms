@@ -1707,8 +1707,6 @@ static unsigned int command_strtoul(const char *cp, char **endp,
 static int handle_private_cmd(struct net_device *net, char *command, u32 cmd_len)
 {
     int bytes_written = 0;
-    char* para = NULL;
-    char* cmd = NULL;
     char *argv[CMD_MAXARGS + 1];
     int argc;
     #ifdef CONFIG_RFTEST
@@ -2344,14 +2342,12 @@ static int handle_private_cmd(struct net_device *net, char *command, u32 cmd_len
         }
         #endif
         else {
-            AICWFDBG(LOGERROR, "wrong cmd:%s in %s\n", cmd, __func__);
+            AICWFDBG(LOGERROR, "wrong cmd:%s in %s\n", argv[0], __func__);
             bytes_written = -EINVAL;
             break;
         }
         #endif
     } while(0);
-    kfree(cmd);
-    kfree(para);
     return bytes_written;
 }
 
@@ -4669,7 +4665,6 @@ static int rwnx_cfg80211_stop_ap(struct wiphy *wiphy, struct net_device *dev)
 {
     struct rwnx_hw *rwnx_hw = wiphy_priv(wiphy);
     struct rwnx_vif *rwnx_vif = netdev_priv(dev);
-    struct rwnx_sta *sta;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
@@ -4690,7 +4685,6 @@ static int rwnx_cfg80211_stop_ap(struct wiphy *wiphy, struct net_device *dev)
     }
 
     /* delete BC/MC STA */
-    sta = &rwnx_hw->sta_table[rwnx_vif->ap.bcmc_index];
     rwnx_txq_vif_deinit(rwnx_hw, rwnx_vif);
     rwnx_del_bcn(&rwnx_vif->ap.bcn);
     rwnx_del_csa(rwnx_vif);
@@ -8826,11 +8820,21 @@ if((g_rwnx_plat->usbdev->chipid == PRODUCT_ID_AIC8801) ||
     atomic_set(&rwnx_hw->runtime_stats.usb_rx_refill_failures, 0);
     atomic_set(&rwnx_hw->runtime_stats.usb_rx_state_rejects, 0);
     atomic_set(&rwnx_hw->runtime_stats.usb_rx_queue_overflows, 0);
+    atomic_set(&rwnx_hw->runtime_stats.usb_rx_completion_errors, 0);
+    atomic_set(&rwnx_hw->runtime_stats.usb_rx_terminal_errors, 0);
+    atomic_set(&rwnx_hw->runtime_stats.usb_rx_short_frames, 0);
+    atomic_set(&rwnx_hw->runtime_stats.usb_rx_invalid_lengths, 0);
     atomic_set(&rwnx_hw->runtime_stats.usb_tx_submit_failures, 0);
+    atomic_set(&rwnx_hw->runtime_stats.usb_tx_completion_errors, 0);
+    atomic_set(&rwnx_hw->runtime_stats.usb_msg_tx_completion_errors, 0);
     atomic_set(&rwnx_hw->runtime_stats.usb_tx_no_buffers, 0);
     atomic_set(&rwnx_hw->runtime_stats.usb_tx_state_rejects, 0);
     atomic_set(&rwnx_hw->runtime_stats.usb_flow_stops, 0);
     atomic_set(&rwnx_hw->runtime_stats.usb_flow_wakes, 0);
+    atomic_set(&rwnx_hw->runtime_stats.fw_msg_invalid, 0);
+    atomic_set(&rwnx_hw->runtime_stats.fw_log_drops, 0);
+    atomic_set(&rwnx_hw->runtime_stats.amsdu_invalid, 0);
+    atomic_set(&rwnx_hw->runtime_stats.radiotap_invalid_rates, 0);
 #ifdef AICWF_SDIO_SUPPORT
     rwnx_hw->sdiodev = rwnx_plat->sdiodev;
     rwnx_plat->sdiodev->rwnx_hw = rwnx_hw;

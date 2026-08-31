@@ -11,8 +11,8 @@ usage() {
 Usage: collect-runtime-logs.sh [--minutes N] [--output FILE] [--no-redact]
 
 Collect read-only AIC8800, USB, network, DKMS, and journal diagnostics.
-MAC addresses, SSIDs, IPv4 addresses, and MAC-derived interface names are
-redacted by default. --no-redact may expose network identifiers.
+Common MAC addresses, SSIDs, IPv4 addresses, and MAC-derived interface names
+are redacted by default. --no-redact may expose network identifiers.
 EOF
 }
 
@@ -49,7 +49,7 @@ done
     exit 2
 }
 
-if [[ -e $output ]]; then
+if [[ -e $output || -L $output ]]; then
     echo "refusing to overwrite existing output: $output" >&2
     exit 1
 fi
@@ -71,6 +71,8 @@ redact_stream() {
         -e 's/wlx[[:xdigit:]]{12}/wlx<MAC>/g' \
         -e 's/^([[:space:]]*[Ss][Ss][Ii][Dd]:).*/\1 <SSID>/' \
         -e 's/(connect to )[^(]*/\1<SSID>/g' \
+        -e "s/([Ss][Ss][Ii][Dd][=:][[:space:]]*)('[^']*'|\"[^\"]*\"|[^,[:space:]]+)/\1<SSID>/g" \
+        -e 's/(SSID[[:space:]]+)[^,[:space:]]+/\1<SSID>/g' \
         -e 's/([0-9]{1,3}\.){3}[0-9]{1,3}/<IPv4>/g'
 }
 
@@ -85,7 +87,7 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(git -C "$script_dir" rev-parse --show-toplevel 2>/dev/null || true)
 
 {
-    printf 'aic8800_runtime_diagnostics_version=1\n'
+    printf 'aic8800_runtime_diagnostics_version=2\n'
     printf 'collected_at=%s\n' "$(date --iso-8601=seconds)"
     printf 'window_minutes=%s\n' "$minutes"
     printf 'redacted=%s\n' "$redact"
@@ -105,6 +107,13 @@ repo_root=$(git -C "$script_dir" rev-parse --show-toplevel 2>/dev/null || true)
     for module in aic8800_fdrv aic_load_fw; do
         printf -- '--- %s ---\n' "$module"
         modinfo "$module" 2>&1 | grep -E '^(filename|version|srcversion|vermagic|signer|description):' || true
+        if [[ -r /sys/module/$module/srcversion ]]; then
+            printf 'loaded_srcversion=%s\n' "$(</sys/module/$module/srcversion)"
+            printf 'loaded_taint=%s\n' "$(</sys/module/$module/taint)"
+            printf 'loaded_refcnt=%s\n' "$(</sys/module/$module/refcnt)"
+        else
+            printf 'loaded_srcversion=[module not loaded or unreadable]\n'
+        fi
         param="/sys/module/$module/parameters/aicwf_dbg_level"
         if [[ -r $param ]]; then
             printf 'aicwf_dbg_level=%s\n' "$(<"$param")"
@@ -115,15 +124,21 @@ repo_root=$(git -C "$script_dir" rev-parse --show-toplevel 2>/dev/null || true)
 
     section "USB topology" lsusb -t
     section "network links" ip -s link
+    section "IPv4 addresses and routes" sh -c 'ip -4 address; ip -4 route'
     section "wireless devices" iw dev
 
     if command -v iw >/dev/null 2>&1; then
         while IFS= read -r iface; do
             [[ -n $iface ]] || continue
             section "wireless link $iface" iw dev "$iface" link
+            if command -v ethtool >/dev/null 2>&1; then
+                section "driver metadata $iface" ethtool -i "$iface"
+                section "driver counters $iface" ethtool -S "$iface"
+            fi
         done < <(iw dev 2>/dev/null | awk '$1 == "Interface" {print $2}')
     fi
 
+    section "debugfs mount" sh -c 'findmnt -rn -t debugfs -o TARGET,SOURCE,OPTIONS || true'
     printf '\n===== driver runtime counters =====\n'
     found_stats=0
     while IFS= read -r stats_file; do
@@ -132,7 +147,7 @@ repo_root=$(git -C "$script_dir" rev-parse --show-toplevel 2>/dev/null || true)
         printf -- '--- %s ---\n' "$stats_file"
         cat "$stats_file" 2>&1 || true
     done < <(find /sys/kernel/debug/ieee80211 -type f \
-        -path '*/aic8800*/diags/runtime_stats' -readable 2>/dev/null)
+        -path '*/rwnx/diags/runtime_stats' -readable 2>/dev/null)
     ((found_stats)) || printf '[runtime_stats unavailable; debugfs may be unmounted or unreadable]\n'
 
     printf '\n===== kernel journal =====\n'
@@ -140,7 +155,8 @@ repo_root=$(git -C "$script_dir" rev-parse --show-toplevel 2>/dev/null || true)
         journalctl -k -b --since "-$minutes min" --no-pager -o short-precise 2>&1 |
             grep -Ei 'AICWFDBG|aic8800|aic_load_fw|usb|xhci|cfg80211|wlan|wlx' || true
     else
-        printf '[journalctl unavailable]\n'
+        dmesg --time-format iso 2>&1 |
+            grep -Ei 'AICWFDBG|aic8800|aic_load_fw|usb|xhci|cfg80211|wlan|wlx' || true
     fi
 
     printf '\n===== NetworkManager journal =====\n'

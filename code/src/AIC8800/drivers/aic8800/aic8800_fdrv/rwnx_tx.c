@@ -1246,7 +1246,6 @@ netdev_tx_t rwnx_start_xmit(struct sk_buff *skb, struct net_device *dev)
     int hdr_pads;
 
     u16 frame_len;
-    u16 frame_oft;
     u8 tid;
     
     struct ethhdr eth_t;
@@ -1388,8 +1387,6 @@ netdev_tx_t rwnx_start_xmit(struct sk_buff *skb, struct net_device *dev)
     }
 
     /* Fill-in TX descriptor */
-    frame_oft = sizeof(struct rwnx_txhdr) - offsetof(struct rwnx_txhdr, hw_hdr)
-                + hdr_pads;// + sizeof(*eth);
  #if 0
 #ifdef CONFIG_RWNX_SPLIT_TX_BUF
     desc->host.packet_addr[0] = sw_txhdr->dma_addr + frame_oft;
@@ -1449,7 +1446,7 @@ int rwnx_start_mgmt_xmit(struct rwnx_vif *vif, struct rwnx_sta *sta,
     struct rwnx_sw_txhdr *sw_txhdr;
     struct txdesc_api *desc;
     struct sk_buff *skb;
-    u16 frame_len, headroom, frame_oft;
+    u16 frame_len, headroom;
     u8 *data;
     int nx_off_chan_txq_idx = NX_OFF_CHAN_TXQ_IDX;
     struct rwnx_txq *txq;
@@ -1603,7 +1600,6 @@ int rwnx_start_mgmt_xmit(struct rwnx_vif *vif, struct rwnx_sta *sta,
         return -EBUSY;
     }
 
-    frame_oft = sizeof(struct rwnx_txhdr) - offsetof(struct rwnx_txhdr, hw_hdr);
 	#if 0
 #ifdef CONFIG_RWNX_SPLIT_TX_BUF
     desc->host.packet_addr[0] = sw_txhdr->dma_addr + frame_oft;
@@ -1662,7 +1658,7 @@ netdev_tx_t rwnx_start_monitor_if_xmit(struct sk_buff *skb, struct net_device *d
     struct txdesc_api *desc;
     struct rwnx_sta *sta;
     struct rwnx_txq *txq;
-    u16_l frame_len, headroom, frame_oft;
+    u16_l frame_len, headroom;
     u8_l tid, rate_fmt = FORMATMOD_NON_HT, rate_idx = 0, txsig_bw = PHY_CHNL_BW_20;
     u8_l *pframe, *data;
     bool robust;
@@ -1938,7 +1934,6 @@ netdev_tx_t rwnx_start_monitor_if_xmit(struct sk_buff *skb, struct net_device *d
     if (robust) {
         desc->host.flags |= TXU_CNTRL_MGMT_ROBUST;
     }
-    frame_oft = sizeof(struct rwnx_txhdr) - offsetof(struct rwnx_txhdr, hw_hdr);
 	#if 0
     #ifdef CONFIG_RWNX_SPLIT_TX_BUF
     desc->host.packet_addr[0] = sw_txhdr->dma_addr + frame_oft;

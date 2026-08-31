@@ -37,6 +37,7 @@ FW_SRC_DIR="$REPO_ROOT/src/AIC8800/fw/aic8800DC"
 FW_DST_DIR="/lib/firmware/aic8800DC"
 RULES_SRC="$REPO_ROOT/src/AIC8800/aic.rules"
 RULES_DST="/etc/udev/rules.d/aic.rules"
+BUILD_TEST="$REPO_ROOT/scripts/build-test.sh"
 
 if [[ ! -f "$VERSION_FILE" ]]; then
     error "VERSION file not found: $VERSION_FILE"
@@ -49,28 +50,42 @@ if [[ ! -d "$SOURCE_DIR" ]]; then
 fi
 
 require_cmd dkms
+require_cmd sha256sum
 require_cmd sudo
 require_cmd udevadm
 
-VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
-if [[ -z "$VERSION" ]]; then
-    error "VERSION file is empty"
+VERSION="$(<"$VERSION_FILE")"
+if [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+)*([.-][0-9A-Za-z]+)*$ ]]; then
+    error "invalid VERSION content: ${VERSION:-<empty>}"
     exit 1
 fi
 
 mapfile -t KERNELS < <(
-    ls -1 /usr/src 2>/dev/null \
-    | grep -E '^linux-headers-' \
-    | sed -E 's/^linux-headers-//' \
-    | sort -u
+    for build_dir in /lib/modules/*/build; do
+        [[ -d "$build_dir" ]] || continue
+        basename "$(dirname "$build_dir")"
+    done | sort -V -u
 )
 
 if [[ ${#KERNELS[@]} -eq 0 ]]; then
-    error "no kernel headers found under /usr/src"
+    error "no usable kernel build directories found under /lib/modules"
     exit 1
 fi
 
 DKMS_SRC_DIR="/usr/src/${MODULE_NAME}-${VERSION}"
+
+info "Preflight compile-only matrix"
+for kernel_ver in "${KERNELS[@]}"; do
+    "$BUILD_TEST" "$kernel_ver"
+done
+
+if [[ -f "$FW_SRC_DIR/SHA256SUMS" ]]; then
+    info "Verify firmware checksums"
+    (cd "$FW_SRC_DIR" && sha256sum -c SHA256SUMS)
+else
+    error "firmware checksum manifest not found: $FW_SRC_DIR/SHA256SUMS"
+    exit 1
+fi
 
 info "Module : $MODULE_NAME"
 info "Version: $VERSION"
@@ -114,10 +129,14 @@ done
 info "Final DKMS status"
 dkms status | grep "$MODULE_NAME" || true
 
+if [[ $FAILED -ne 0 ]]; then
+    echo "[ERROR] One or more kernels failed; firmware and udev files were not changed." >&2
+    exit 2
+fi
+
 info "Install firmware files"
 if [[ -d "$FW_SRC_DIR" ]]; then
-    sudo rm -rf "$FW_DST_DIR"
-    sudo mkdir -p "$FW_DST_DIR"
+    sudo install -d -m 0755 "$FW_DST_DIR"
     sudo cp -a "$FW_SRC_DIR/." "$FW_DST_DIR/"
 else
     warn "firmware source not found: $FW_SRC_DIR"
@@ -127,17 +146,12 @@ info "Install udev rule for AIC MSC eject"
 if [[ -f "$RULES_SRC" ]]; then
     sudo install -m 0644 "$RULES_SRC" "$RULES_DST"
     sudo udevadm control --reload
-    sudo udevadm trigger
+    info "udev rules reloaded; replug the AIC device to apply the rule"
 else
     warn "udev rule source not found: $RULES_SRC"
 fi
 
 info "Remove old usb-storage quirk config if exists"
 sudo rm -f /etc/modprobe.d/aic8800-usb-storage-quirks.conf
-
-if [[ $FAILED -ne 0 ]]; then
-    echo "[ERROR] One or more kernels failed. Please check logs above." >&2
-    exit 2
-fi
 
 echo "[OK] Refreshed DKMS module for all kernels with headers."

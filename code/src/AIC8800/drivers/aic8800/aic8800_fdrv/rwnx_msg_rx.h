@@ -26,7 +26,8 @@ void rwnx_conn_cancel(struct rwnx_vif *rwnx_vif, u16 reason,
                       const char *source);
 int rwnx_conn_guard_stats_format(char *buf, size_t size);
 
-void rwnx_rx_handle_msg(struct rwnx_hw *rwnx_hw, struct ipc_e2a_msg *msg);
+void rwnx_rx_handle_msg(struct rwnx_hw *rwnx_hw, struct ipc_e2a_msg *msg,
+                        size_t msg_len);
 void rwnx_rx_handle_print(struct rwnx_hw *rwnx_hw, u8 *msg, u32 len);
 
 #endif /* _RWNX_MSG_RX_H_ */

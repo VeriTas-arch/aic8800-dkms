@@ -9,6 +9,7 @@
 #ifndef _AICWF_USB_H_
 #define _AICWF_USB_H_
 
+#include <linux/mutex.h>
 #include <linux/usb.h>
 #include "rwnx_cmds.h"
 
@@ -117,10 +118,11 @@ struct aic_usb_dev {
 #endif
 
     struct usb_anchor rx_submitted;
-    struct work_struct rx_urb_work;
+    struct usb_anchor tx_submitted;
+    struct delayed_work rx_urb_work;
 #ifdef CONFIG_USB_MSG_IN_EP
 	struct usb_anchor msg_rx_submitted;
-	struct work_struct msg_rx_urb_work;
+	struct delayed_work msg_rx_urb_work;
 #endif
 
     spinlock_t rx_free_lock;
@@ -157,8 +159,9 @@ struct aic_usb_dev {
 #endif
 
     int msg_finished;
+    int msg_status;
     wait_queue_head_t msg_wait;
-    ulong msg_busy;
+    struct mutex msg_tx_lock;
     struct urb *msg_out_urb;
     #ifdef CONFIG_USB_NO_TRANS_DMA_MAP
     dma_addr_t cmd_dma_trans_addr;
@@ -181,6 +184,11 @@ enum aicwf_usb_tx_wake_result
 aicwf_usb_tx_maybe_wake(struct rwnx_hw *rwnx_hw,
                         struct net_device *ndev);
 void aicwf_usb_cancel_all_urbs(struct aic_usb_dev *usb_dev);
+#ifdef CONFIG_USB_TX_AGGR
+int aicwf_usb_send_pkt(struct aic_usb_dev *usb_dev, u8 *buf, uint buf_len);
+int aicwf_usb_aggr(struct aicwf_tx_priv *tx_priv, struct sk_buff *pkt);
+int aicwf_usb_send(struct aicwf_tx_priv *tx_priv);
+#endif
 #ifdef CONFIG_USB_MSG_IN_EP
 int usb_msg_busrx_thread(void *data);
 #endif

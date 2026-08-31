@@ -651,11 +651,21 @@ struct rwnx_runtime_stats {
     atomic_t usb_rx_refill_failures;
     atomic_t usb_rx_state_rejects;
     atomic_t usb_rx_queue_overflows;
+    atomic_t usb_rx_completion_errors;
+    atomic_t usb_rx_terminal_errors;
+    atomic_t usb_rx_short_frames;
+    atomic_t usb_rx_invalid_lengths;
     atomic_t usb_tx_submit_failures;
+    atomic_t usb_tx_completion_errors;
+    atomic_t usb_msg_tx_completion_errors;
     atomic_t usb_tx_no_buffers;
     atomic_t usb_tx_state_rejects;
     atomic_t usb_flow_stops;
     atomic_t usb_flow_wakes;
+    atomic_t fw_msg_invalid;
+    atomic_t fw_log_drops;
+    atomic_t amsdu_invalid;
+    atomic_t radiotap_invalid_rates;
 };
 
 struct rwnx_hw {

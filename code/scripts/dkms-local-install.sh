@@ -49,6 +49,7 @@ FW_DST_DIR="/lib/firmware/aic8800DC"
 KERNEL_VER="${1:-$(uname -r)}"
 RULES_SRC="$REPO_ROOT/src/AIC8800/aic.rules"
 RULES_DST="/etc/udev/rules.d/aic.rules"
+BUILD_TEST="$REPO_ROOT/scripts/build-test.sh"
 
 if [[ ! -f "$VERSION_FILE" ]]; then
     error "VERSION file not found: $VERSION_FILE"
@@ -61,12 +62,13 @@ if [[ ! -d "$SOURCE_DIR" ]]; then
 fi
 
 require_cmd dkms
+require_cmd sha256sum
 require_cmd sudo
 require_cmd udevadm
 
-VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
-if [[ -z "$VERSION" ]]; then
-    error "VERSION file is empty"
+VERSION="$(<"$VERSION_FILE")"
+if [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+)*([.-][0-9A-Za-z]+)*$ ]]; then
+    error "invalid VERSION content: ${VERSION:-<empty>}"
     exit 1
 fi
 
@@ -76,6 +78,17 @@ if [[ ! -d "/lib/modules/$KERNEL_VER/build" ]]; then
 fi
 
 DKMS_SRC_DIR="/usr/src/${MODULE_NAME}-${VERSION}"
+
+info "Preflight compile for $KERNEL_VER"
+"$BUILD_TEST" "$KERNEL_VER"
+
+if [[ -f "$FW_SRC_DIR/SHA256SUMS" ]]; then
+    info "Verify firmware checksums"
+    (cd "$FW_SRC_DIR" && sha256sum -c SHA256SUMS)
+else
+    error "firmware checksum manifest not found: $FW_SRC_DIR/SHA256SUMS"
+    exit 1
+fi
 
 info "Module: $MODULE_NAME"
 info "Version: $VERSION"
@@ -87,14 +100,18 @@ sudo mkdir -p "$DKMS_SRC_DIR"
 sudo cp -a "$SOURCE_DIR/." "$DKMS_SRC_DIR/"
 sudo sed -i "s/^PACKAGE_VERSION=.*/PACKAGE_VERSION=\"$VERSION\"/" "$DKMS_SRC_DIR/dkms.conf"
 
-info "Refresh old DKMS state if exists"
-# Keep previous behavior: remove existing entries of this version before re-adding.
-# This ensures source and dkms metadata stay in sync for a clean local reinstall.
-sudo dkms remove -m "$MODULE_NAME" -v "$VERSION" --all >/dev/null 2>&1 || true
+info "Refresh DKMS state for target kernel"
+sudo dkms remove -m "$MODULE_NAME" -v "$VERSION" -k "$KERNEL_VER" \
+    >/dev/null 2>&1 || true
 cleanup_legacy_module_dirs
 
-info "dkms add"
-sudo dkms add -m "$MODULE_NAME" -v "$VERSION"
+if dkms status -m "$MODULE_NAME" -v "$VERSION" 2>/dev/null |
+    grep -Fq "$MODULE_NAME/$VERSION"; then
+    info "DKMS source is already registered for another kernel"
+else
+    info "dkms add"
+    sudo dkms add -m "$MODULE_NAME" -v "$VERSION"
+fi
 
 info "dkms build"
 sudo dkms build -m "$MODULE_NAME" -v "$VERSION" -k "$KERNEL_VER"
@@ -104,8 +121,7 @@ sudo dkms install -m "$MODULE_NAME" -v "$VERSION" -k "$KERNEL_VER"
 
 info "Install firmware files"
 if [[ -d "$FW_SRC_DIR" ]]; then
-    sudo rm -rf "$FW_DST_DIR"
-    sudo mkdir -p "$FW_DST_DIR"
+    sudo install -d -m 0755 "$FW_DST_DIR"
     sudo cp -a "$FW_SRC_DIR/." "$FW_DST_DIR/"
 else
     warn "firmware source not found: $FW_SRC_DIR"
@@ -115,7 +131,7 @@ info "Install udev rule for AIC MSC eject"
 if [[ -f "$RULES_SRC" ]]; then
     sudo install -m 0644 "$RULES_SRC" "$RULES_DST"
     sudo udevadm control --reload
-    sudo udevadm trigger
+    info "udev rules reloaded; replug the AIC device to apply the rule"
 else
     warn "udev rule source not found: $RULES_SRC"
 fi

@@ -44,7 +44,7 @@ ifeq ($(CONFIG_PLATFORM_UBUNTU), y)
 KDIR  ?= /lib/modules/$(shell uname -r)/build
 PWD   ?= $(shell pwd)
 KVER ?= $(shell uname -r)
-MODDESTDIR ?= /lib/modules/$(KVER)/kernel/drivers/net/wireless/aic8800
+MODDESTDIR ?= /lib/modules/$(KVER)/updates/dkms
 ARCH ?= $(shell uname -m)
 CROSS_COMPILE ?=
 endif
@@ -52,7 +52,7 @@ endif
 
 all: modules
 modules:
-	make -C $(KDIR) M=$(PWD) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) modules
+	$(MAKE) -C $(KDIR) M=$(PWD) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) modules
 
 install:
 	mkdir -p $(MODDESTDIR)
@@ -61,12 +61,12 @@ install:
 	/sbin/depmod -a ${KVER}
 
 uninstall:
-	rm -rfv $(MODDESTDIR)/aic_load_fw.ko
-	rm -rfv $(MODDESTDIR)/aic8800_fdrv.ko
+	rm -fv $(MODDESTDIR)/aic_load_fw.ko
+	rm -fv $(MODDESTDIR)/aic8800_fdrv.ko
 	rmdir $(MODDESTDIR) 2>/dev/null || true
 	/sbin/depmod -a ${KVER}
 
 clean:
-	cd aic_load_fw/;make clean;cd ..
-	cd aic8800_fdrv/;make clean;cd ..
+	$(MAKE) -C aic_load_fw clean
+	$(MAKE) -C aic8800_fdrv clean
 	rm -rf modules.order Module.symvers .tmp_versions/
