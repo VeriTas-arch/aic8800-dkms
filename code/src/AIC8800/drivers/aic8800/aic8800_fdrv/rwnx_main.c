@@ -9238,7 +9238,7 @@ static int __init rwnx_mod_init(void)
     rwnx_print_version();
 	AICWFDBG(LOGINFO, "RELEASE DATE:%s \r\n", RELEASE_DATE);
 	AICWFDBG(LOGINFO,
-	         "conn_txn_revision=3 log_schema=2 runtime_stats=1 log_mask=0x%x timeout_ms=12000 late_disconnect_guard_ms=1500 roam_carrier_preserve=1\r\n",
+	         "conn_txn_revision=4 log_schema=3 runtime_stats=1 log_mask=0x%x timeout_ms=12000 late_disconnect_guard_ms=1500 roam_carrier_preserve=1\r\n",
 	         READ_ONCE(aicwf_dbg_level));
 	rwnx_init_cmd_array();
 

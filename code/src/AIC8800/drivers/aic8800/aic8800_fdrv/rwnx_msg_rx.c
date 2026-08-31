@@ -362,21 +362,44 @@ static inline int rwnx_rx_rssi_status_ind(struct rwnx_hw *rwnx_hw,
 {
     struct mm_rssi_status_ind *ind = (struct mm_rssi_status_ind *)msg->param;
     int vif_idx  = ind->vif_index;
-    bool rssi_status = ind->rssi_status;
-
+    unsigned int rssi_status_raw = 0;
+    bool low_event;
     struct rwnx_vif *vif_entry;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
+    memcpy(&rssi_status_raw, &ind->rssi_status, sizeof(ind->rssi_status));
+    low_event = rssi_status_raw != 0;
+    if (rssi_status_raw > 1)
+        atomic_inc(&rwnx_hw->runtime_stats.cqm_rssi_noncanonical_status);
+
 #ifdef CONFIG_RWNX_FULLMAC
-    if (vif_idx < 0 || vif_idx >= ARRAY_SIZE(rwnx_hw->vif_table))
+    if (vif_idx < 0 || vif_idx >= ARRAY_SIZE(rwnx_hw->vif_table)) {
+        atomic_inc(&rwnx_hw->runtime_stats.cqm_rssi_invalid_vif);
+        AICWFDBG_RATELIMITED(LOGERROR,
+                             "rssi_cqm invalid vif:%d event:%s rssi:%d raw_status:%u\n",
+                             vif_idx, low_event ? "low" : "high",
+                             ind->rssi, rssi_status_raw);
         return 0;
+    }
     vif_entry = rwnx_hw->vif_table[vif_idx];
     if (vif_entry && vif_entry->ndev) {
+        atomic_inc(low_event ? &rwnx_hw->runtime_stats.cqm_rssi_low_events :
+                               &rwnx_hw->runtime_stats.cqm_rssi_high_events);
+        AICWFDBG(LOGINFO,
+                 "rssi_cqm vif:%d event:%s rssi:%d raw_status:%u\r\n",
+                 vif_idx, low_event ? "low" : "high", ind->rssi,
+                 rssi_status_raw);
         cfg80211_cqm_rssi_notify(vif_entry->ndev,
-                                 rssi_status ? NL80211_CQM_RSSI_THRESHOLD_EVENT_LOW :
-                                               NL80211_CQM_RSSI_THRESHOLD_EVENT_HIGH,
+                                 low_event ? NL80211_CQM_RSSI_THRESHOLD_EVENT_LOW :
+                                             NL80211_CQM_RSSI_THRESHOLD_EVENT_HIGH,
                                  ind->rssi, GFP_ATOMIC);
+    } else {
+        atomic_inc(&rwnx_hw->runtime_stats.cqm_rssi_invalid_vif);
+        AICWFDBG_RATELIMITED(LOGERROR,
+                             "rssi_cqm missing vif:%d event:%s rssi:%d raw_status:%u\n",
+                             vif_idx, low_event ? "low" : "high",
+                             ind->rssi, rssi_status_raw);
     }
 #endif /* CONFIG_RWNX_FULLMAC */
 
@@ -874,8 +897,7 @@ static void rwnx_conn_cleanup_terminal(
 static void rwnx_conn_tx_abort_pause(struct rwnx_vif *rwnx_vif);
 
 enum rwnx_conn_guard_stat {
-    RWNX_GUARD_INVALID_ROAMED = 0,
-    RWNX_GUARD_SUPPRESS_INVALID_ROAM,
+    RWNX_GUARD_NONCANONICAL_ROAMED = 0,
     RWNX_GUARD_DROP_STALE_SUCCESS,
     RWNX_GUARD_SYNTH_ROAM,
     RWNX_GUARD_DUP_CONNECTED,
@@ -895,8 +917,7 @@ static unsigned long rwnx_conn_guard_last_report_jiffies;
 static DEFINE_SPINLOCK(rwnx_conn_guard_report_lock);
 
 static const char * const rwnx_conn_guard_stat_names[RWNX_GUARD_STAT_MAX] = {
-    [RWNX_GUARD_INVALID_ROAMED] = "invalid_roamed",
-    [RWNX_GUARD_SUPPRESS_INVALID_ROAM] = "suppress_invalid_roam",
+    [RWNX_GUARD_NONCANONICAL_ROAMED] = "noncanonical_roamed",
     [RWNX_GUARD_DROP_STALE_SUCCESS] = "stale_success",
     [RWNX_GUARD_SYNTH_ROAM] = "synth_roam",
     [RWNX_GUARD_DUP_CONNECTED] = "dup_connected",
@@ -957,9 +978,8 @@ static inline void rwnx_conn_guard_maybe_report(void)
     spin_unlock_irqrestore(&rwnx_conn_guard_report_lock, flags);
 
     AICWFDBG(LOGINFO,
-             "conn_guard_summary(+10s): invalid_roamed=%d(total=%d) suppress_invalid_roam=%d(total=%d) stale_success=%d(total=%d) synth_roam=%d(total=%d) dup_connected=%d(total=%d) dup_ind=%d(total=%d) prev_state_suppress=%d(total=%d) dup_txn_connect=%d(total=%d) dup_txn_roam=%d(total=%d) transient_disc=%d(total=%d)\r\n",
-             delta[RWNX_GUARD_INVALID_ROAMED], total[RWNX_GUARD_INVALID_ROAMED],
-             delta[RWNX_GUARD_SUPPRESS_INVALID_ROAM], total[RWNX_GUARD_SUPPRESS_INVALID_ROAM],
+             "conn_guard_summary(+10s): noncanonical_roamed=%d(total=%d) stale_success=%d(total=%d) synth_roam=%d(total=%d) dup_connected=%d(total=%d) dup_ind=%d(total=%d) prev_state_suppress=%d(total=%d) dup_txn_connect=%d(total=%d) dup_txn_roam=%d(total=%d) transient_disc=%d(total=%d)\r\n",
+             delta[RWNX_GUARD_NONCANONICAL_ROAMED], total[RWNX_GUARD_NONCANONICAL_ROAMED],
              delta[RWNX_GUARD_DROP_STALE_SUCCESS], total[RWNX_GUARD_DROP_STALE_SUCCESS],
              delta[RWNX_GUARD_SYNTH_ROAM], total[RWNX_GUARD_SYNTH_ROAM],
              delta[RWNX_GUARD_DUP_CONNECTED], total[RWNX_GUARD_DUP_CONNECTED],
@@ -1435,6 +1455,10 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
     int prev_state;
     bool transaction_active;
     bool had_sta_ap;
+    bool prev_valid;
+    bool bssid_changed;
+    bool roamed_hint;
+    bool roamed_noncanonical;
     bool roam = false;
     bool synthesized_roam = false;
     bool stale = false;
@@ -1476,17 +1500,23 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
         roam = txn.kind == RWNX_CONN_TXN_ROAM;
     }
 
+    prev_valid = had_sta_ap || (transaction_active && txn.prev_valid);
+    bssid_changed = prev_valid &&
+        !is_zero_ether_addr((const u8 *)ind->bssid.array) &&
+        memcmp(prev_bssid, ind->bssid.array, ETH_ALEN);
     memcpy(&roamed_raw, &ind->roamed, sizeof(ind->roamed));
-    if (roamed_raw != 0 && roamed_raw != 1)
-        rwnx_conn_guard_note(RWNX_GUARD_INVALID_ROAMED);
+    roamed_hint = roamed_raw != 0;
+    roamed_noncanonical = roamed_raw > 1;
+    if (roamed_noncanonical)
+        rwnx_conn_guard_note(RWNX_GUARD_NONCANONICAL_ROAMED);
 
     if (!transaction_active && ind->status_code == 0) {
-        if ((roamed_raw == 1) && had_sta_ap &&
-            prev_state == RWNX_DRV_STATUS_CONNECTED) {
+        if (roamed_hint && had_sta_ap &&
+            prev_state == RWNX_DRV_STATUS_CONNECTED && bssid_changed) {
             roam = true;
         } else if (had_sta_ap &&
                    prev_state == RWNX_DRV_STATUS_CONNECTED &&
-                   memcmp(prev_bssid, ind->bssid.array, ETH_ALEN)) {
+                   bssid_changed) {
             roam = true;
             synthesized_roam = true;
             rwnx_conn_guard_note(RWNX_GUARD_SYNTH_ROAM);
@@ -1494,12 +1524,13 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
             rwnx_conn_guard_note(had_sta_ap ? RWNX_GUARD_DUP_CONNECTED :
                                              RWNX_GUARD_SUPPRESS_PREV_STATE);
             AICWFDBG(LOGINFO,
-                     "conn_ind evt:%u vif:%u decision:drop_no_txn status:%u raw_roamed:%u state:%d had_ap:%d\r\n",
+                     "conn_ind evt:%u vif:%u decision:drop_no_txn status:%u raw_roamed:%u noncanonical:%d bssid_changed:%d state:%d had_ap:%d\r\n",
                      evt_id, ind->vif_idx, ind->status_code, roamed_raw,
-                     prev_state, had_sta_ap);
+                     roamed_noncanonical, bssid_changed, prev_state,
+                     had_sta_ap);
             return 0;
         }
-    } else if (transaction_active && roam && roamed_raw != 1 &&
+    } else if (transaction_active && roam && !roamed_hint &&
                ind->status_code == 0) {
         synthesized_roam = true;
         rwnx_conn_guard_note(RWNX_GUARD_SYNTH_ROAM);
@@ -1548,17 +1579,15 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
     }
 
     AICWFDBG(LOGINFO,
-             "conn_ind evt:%u txn:%u vif:%u kind:%u phase:%u status:%u raw_roamed:%u roam:%d synth:%d age_ms:%lu state:%d had_ap:%d prev_set:%d target_set:%d bssid_changed:%d stale:%d mismatch:%d malformed:%d\r\n",
+             "conn_ind evt:%u txn:%u vif:%u kind:%u phase:%u status:%u raw_roamed:%u noncanonical:%d roam:%d synth:%d age_ms:%lu state:%d had_ap:%d prev_set:%d target_set:%d bssid_changed:%d stale:%d mismatch:%d malformed:%d\r\n",
              evt_id, transaction_active ? txn.id : 0, ind->vif_idx,
              transaction_active ? txn.kind : RWNX_CONN_TXN_NONE,
              transaction_active ? txn.phase : RWNX_CONN_TXN_IDLE,
-             ind->status_code, roamed_raw, roam, synthesized_roam, age_ms,
-             prev_state, had_sta_ap,
-             had_sta_ap || (transaction_active && txn.prev_valid),
+             ind->status_code, roamed_raw, roamed_noncanonical, roam,
+             synthesized_roam, age_ms, prev_state, had_sta_ap, prev_valid,
              transaction_active ? txn.target_valid :
                  !is_zero_ether_addr((const u8 *)ind->bssid.array),
-             had_sta_ap && memcmp(prev_bssid, ind->bssid.array, ETH_ALEN),
-             stale, target_mismatch, malformed_success);
+             bssid_changed, stale, target_mismatch, malformed_success);
 
     if (ind->status_code != 0 || stale || target_mismatch ||
         malformed_success) {
@@ -1763,7 +1792,7 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
              transaction_active ? txn.phase : RWNX_CONN_TXN_IDLE,
              roam ? "roamed" : "connect_result", age_ms, pause_ms,
              rwnx_conn_tx_resume_name(tx_resume),
-             had_sta_ap && memcmp(prev_bssid, ind->bssid.array, ETH_ALEN),
+             bssid_changed,
              arm_late_disconnect,
              atomic_read(&rwnx_vif->drv_conn_state),
              netif_carrier_ok(dev));

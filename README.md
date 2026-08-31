@@ -159,6 +159,12 @@ sudo ./code/scripts/collect-runtime-logs.sh --minutes 30 --output /tmp/aic8800-r
 固件消息非法、A-MSDU/monitor 元数据非法以及固件日志丢弃计数。计数保持为零
 是健康基线；非零不一定代表持续故障，应结合增量和同一时间段的内核日志判断。
 
+自动漫游时，`conn_guard_noncanonical_roamed` 可能因固件以 `0x20` 等非零值表示
+布尔真而增长，该计数本身不代表漫游失败。`conn_guard_synth_roam` 仅统计固件未
+提供漫游提示、但驱动根据活动事务或 BSSID 变化恢复语义的情况。RSSI/CQM 的
+高低阈值事件、非规范状态值和无效 VIF 分别记录在 `cqm_rssi_*` 计数中，可与
+NetworkManager 和 wpa_supplicant 的时间线对照分析漫游原因。
+
 采集结果还包含启动 ID、源码提交与工作树状态、已加载模块和磁盘模块的
 `srcversion`/`vermagic`、USB 拓扑、接口统计、驱动计数以及 NetworkManager 日志，
 可用于区分驱动异常、USB 总线异常和上游网络问题。

@@ -608,6 +608,18 @@ static ssize_t rwnx_dbgfs_runtime_stats_read(struct file *file,
 
     len = rwnx_conn_guard_stats_format(buf, bufsz);
     len += scnprintf(buf + len, bufsz - len,
+                     "cqm_rssi_low_events=%d\n",
+                     atomic_read(&stats->cqm_rssi_low_events));
+    len += scnprintf(buf + len, bufsz - len,
+                     "cqm_rssi_high_events=%d\n",
+                     atomic_read(&stats->cqm_rssi_high_events));
+    len += scnprintf(buf + len, bufsz - len,
+                     "cqm_rssi_noncanonical_status=%d\n",
+                     atomic_read(&stats->cqm_rssi_noncanonical_status));
+    len += scnprintf(buf + len, bufsz - len,
+                     "cqm_rssi_invalid_vif=%d\n",
+                     atomic_read(&stats->cqm_rssi_invalid_vif));
+    len += scnprintf(buf + len, bufsz - len,
                      "roam_tx_pauses=%d\n",
                      atomic_read(&stats->roam_tx_pauses));
     len += scnprintf(buf + len, bufsz - len,

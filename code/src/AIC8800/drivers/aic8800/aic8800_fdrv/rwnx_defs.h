@@ -643,6 +643,10 @@ struct sta_tx_flowctrl {
 };
 
 struct rwnx_runtime_stats {
+    atomic_t cqm_rssi_low_events;
+    atomic_t cqm_rssi_high_events;
+    atomic_t cqm_rssi_noncanonical_status;
+    atomic_t cqm_rssi_invalid_vif;
     atomic_t roam_tx_pauses;
     atomic_t roam_tx_resume_immediate;
     atomic_t roam_tx_resume_deferred_tbusy;
