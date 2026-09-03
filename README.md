@@ -4,8 +4,17 @@
 
 驱动来源：
 
-- [水星官方驱动](https://service.mercurycom.com.cn/download-2596.html)
+- [水星 UX3H(免驱版) V1.0 Linux 系统驱动程序 20250118](https://service.mercurycom.com.cn/download-2917.html)
 - [原修改版驱动](https://github.com/bk1d/aic8800fdrvpackage)
+
+固件基线：
+
+- 2026-09-03 核对的上述水星官方 ZIP，SHA-256 为
+  `13551eb7d0fec9c6b96c23e7e4a04a7adc7d8401fb18c450bb40f6fb1316120a`
+- 仓库中的 12 个 AIC8800DC 固件二进制与该官方包逐文件一致；
+  `aic_userconfig_8800dc.txt` 仅省略了末尾空行
+- 官方包额外包含的 AIC8800DW 配置不属于当前已支持的 AIC8800DC 设备路径，
+  因此未引入本仓库
 
 ## 目录说明
 
