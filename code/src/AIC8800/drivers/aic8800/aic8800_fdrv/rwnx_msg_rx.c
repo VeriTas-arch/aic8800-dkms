@@ -1507,6 +1507,8 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
     memcpy(&roamed_raw, &ind->roamed, sizeof(ind->roamed));
     roamed_hint = roamed_raw != 0;
     roamed_noncanonical = roamed_raw > 1;
+    if (ind->status_code)
+        atomic_inc(&rwnx_hw->runtime_stats.conn_firmware_rejects);
     if (roamed_noncanonical)
         rwnx_conn_guard_note(RWNX_GUARD_NONCANONICAL_ROAMED);
 

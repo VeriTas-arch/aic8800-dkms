@@ -11,6 +11,7 @@
 
 #include <linux/skbuff.h>
 #include <linux/sched.h>
+#include <linux/mutex.h>
 #include "ipc_shared.h"
 #include "aicwf_rx_prealloc.h"
 #ifdef AICWF_SDIO_SUPPORT
@@ -100,6 +101,7 @@ struct aicwf_bus {
     struct aicwf_bus_ops *ops;
     enum aicwf_bus_state state;
     u8 *cmd_buf;
+    struct mutex cmd_buf_lock;
     struct completion bustx_trgg;
     struct completion busrx_trgg;
 #ifdef CONFIG_USB_MSG_IN_EP

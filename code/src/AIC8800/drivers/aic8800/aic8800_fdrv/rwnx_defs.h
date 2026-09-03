@@ -643,6 +643,9 @@ struct sta_tx_flowctrl {
 };
 
 struct rwnx_runtime_stats {
+    u32 device_generation;
+    u64 started_jiffies;
+    atomic_t conn_firmware_rejects;
     atomic_t cqm_rssi_low_events;
     atomic_t cqm_rssi_high_events;
     atomic_t cqm_rssi_noncanonical_status;
@@ -659,13 +662,30 @@ struct rwnx_runtime_stats {
     atomic_t usb_rx_terminal_errors;
     atomic_t usb_rx_short_frames;
     atomic_t usb_rx_invalid_lengths;
+    atomic_t usb_msg_rx_submit_failures;
+    atomic_t usb_msg_rx_refill_failures;
+    atomic_t usb_msg_rx_state_rejects;
+    atomic_t usb_msg_rx_completion_errors;
+    atomic_t usb_msg_rx_terminal_errors;
+    atomic_t usb_msg_rx_invalid_lengths;
+    atomic_t usb_msg_rx_queue_overflows;
     atomic_t usb_tx_submit_failures;
     atomic_t usb_tx_completion_errors;
+    atomic_t usb_msg_tx_submit_failures;
     atomic_t usb_msg_tx_completion_errors;
+    atomic_t usb_msg_tx_state_rejects;
     atomic_t usb_tx_no_buffers;
     atomic_t usb_tx_state_rejects;
     atomic_t usb_flow_stops;
     atomic_t usb_flow_wakes;
+    atomic_t cmd_alloc_failures;
+    atomic_t cmd_pool_high_water;
+    atomic_t cmd_atomic_rejects;
+    atomic_t cmd_bus_down_rejects;
+    atomic_t cmd_tx_failures;
+    atomic_t cmd_timeouts;
+    atomic_t cmd_cfm_before_push;
+    atomic_t cmd_cfm_oversize;
     atomic_t fw_msg_invalid;
     atomic_t fw_log_drops;
     atomic_t amsdu_invalid;

@@ -87,7 +87,7 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(git -C "$script_dir" rev-parse --show-toplevel 2>/dev/null || true)
 
 {
-    printf 'aic8800_runtime_diagnostics_version=2\n'
+    printf 'aic8800_runtime_diagnostics_version=3\n'
     printf 'collected_at=%s\n' "$(date --iso-8601=seconds)"
     printf 'window_minutes=%s\n' "$minutes"
     printf 'redacted=%s\n' "$redact"
@@ -106,7 +106,7 @@ repo_root=$(git -C "$script_dir" rev-parse --show-toplevel 2>/dev/null || true)
     printf '\n===== module metadata and log masks =====\n'
     for module in aic8800_fdrv aic_load_fw; do
         printf -- '--- %s ---\n' "$module"
-        modinfo "$module" 2>&1 | grep -E '^(filename|version|srcversion|vermagic|signer|description):' || true
+        modinfo "$module" 2>&1 | grep -E '^(filename|version|dkms_version|srcversion|vermagic|signer|description):' || true
         if [[ -r /sys/module/$module/srcversion ]]; then
             printf 'loaded_srcversion=%s\n' "$(</sys/module/$module/srcversion)"
             printf 'loaded_taint=%s\n' "$(</sys/module/$module/taint)"

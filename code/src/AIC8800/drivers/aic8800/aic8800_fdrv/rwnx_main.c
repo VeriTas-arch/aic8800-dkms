@@ -34,6 +34,7 @@
 #include "rwnx_irqs.h"
 #include "rwnx_radar.h"
 #include "rwnx_version.h"
+#include "../aic_dkms_version.h"
 #ifdef CONFIG_RWNX_BFMER
 #include "rwnx_bfmer.h"
 #endif //(CONFIG_RWNX_BFMER)
@@ -61,6 +62,8 @@
 #define RW_DRV_DESCRIPTION  "RivieraWaves 11nac driver for Linux cfg80211"
 #define RW_DRV_COPYRIGHT    "Copyright(c) 2015-2017 RivieraWaves"
 #define RW_DRV_AUTHOR       "RivieraWaves S.A.S"
+
+static atomic_t rwnx_runtime_generation = ATOMIC_INIT(0);
 
 #define RWNX_PRINT_CFM_ERR(req) \
         printk(KERN_CRIT "%s: Status Error(%d)\n", #req, (&req##_cfm)->status)
@@ -8780,6 +8783,7 @@ int rwnx_cfg80211_init(struct rwnx_plat *rwnx_plat, void **platform_data)
     struct aic_feature_t feature;
 #endif
     struct mm_set_stack_start_cfm set_start_cfm;
+    size_t fw_version_len;
 
     int nx_remote_sta_max = NX_REMOTE_STA_MAX;
 
@@ -8812,29 +8816,10 @@ if((g_rwnx_plat->usbdev->chipid == PRODUCT_ID_AIC8801) ||
     rwnx_hw->wiphy = wiphy;
     rwnx_hw->plat = rwnx_plat;
     rwnx_hw->dev = rwnx_platform_get_dev(rwnx_plat);
-    atomic_set(&rwnx_hw->runtime_stats.roam_tx_pauses, 0);
-    atomic_set(&rwnx_hw->runtime_stats.roam_tx_resume_immediate, 0);
-    atomic_set(&rwnx_hw->runtime_stats.roam_tx_resume_deferred_tbusy, 0);
-    atomic_set(&rwnx_hw->runtime_stats.roam_tx_resume_blocked, 0);
-    atomic_set(&rwnx_hw->runtime_stats.usb_rx_submit_failures, 0);
-    atomic_set(&rwnx_hw->runtime_stats.usb_rx_refill_failures, 0);
-    atomic_set(&rwnx_hw->runtime_stats.usb_rx_state_rejects, 0);
-    atomic_set(&rwnx_hw->runtime_stats.usb_rx_queue_overflows, 0);
-    atomic_set(&rwnx_hw->runtime_stats.usb_rx_completion_errors, 0);
-    atomic_set(&rwnx_hw->runtime_stats.usb_rx_terminal_errors, 0);
-    atomic_set(&rwnx_hw->runtime_stats.usb_rx_short_frames, 0);
-    atomic_set(&rwnx_hw->runtime_stats.usb_rx_invalid_lengths, 0);
-    atomic_set(&rwnx_hw->runtime_stats.usb_tx_submit_failures, 0);
-    atomic_set(&rwnx_hw->runtime_stats.usb_tx_completion_errors, 0);
-    atomic_set(&rwnx_hw->runtime_stats.usb_msg_tx_completion_errors, 0);
-    atomic_set(&rwnx_hw->runtime_stats.usb_tx_no_buffers, 0);
-    atomic_set(&rwnx_hw->runtime_stats.usb_tx_state_rejects, 0);
-    atomic_set(&rwnx_hw->runtime_stats.usb_flow_stops, 0);
-    atomic_set(&rwnx_hw->runtime_stats.usb_flow_wakes, 0);
-    atomic_set(&rwnx_hw->runtime_stats.fw_msg_invalid, 0);
-    atomic_set(&rwnx_hw->runtime_stats.fw_log_drops, 0);
-    atomic_set(&rwnx_hw->runtime_stats.amsdu_invalid, 0);
-    atomic_set(&rwnx_hw->runtime_stats.radiotap_invalid_rates, 0);
+    memset(&rwnx_hw->runtime_stats, 0, sizeof(rwnx_hw->runtime_stats));
+    rwnx_hw->runtime_stats.device_generation =
+        (u32)atomic_inc_return(&rwnx_runtime_generation);
+    rwnx_hw->runtime_stats.started_jiffies = get_jiffies_64();
 #ifdef AICWF_SDIO_SUPPORT
     rwnx_hw->sdiodev = rwnx_plat->sdiodev;
     rwnx_plat->sdiodev->rwnx_hw = rwnx_hw;
@@ -8937,9 +8922,18 @@ if((g_rwnx_plat->usbdev->chipid == PRODUCT_ID_AIC8801) ||
 	AICWFDBG(LOGINFO, "is 5g support = %d, vendor_info = 0x%02X\n", set_start_cfm.is_5g_support, set_start_cfm.vendor_info);
 	rwnx_hw->band_5g_support = set_start_cfm.is_5g_support;
 
+    memset(&fw_version, 0, sizeof(fw_version));
     ret = rwnx_send_get_fw_version_req(rwnx_hw, &fw_version);
-    memcpy(wiphy->fw_version, fw_version.fw_version, fw_version.fw_version_len>32? 32 : fw_version.fw_version_len>32);
-	AICWFDBG(LOGINFO, "Firmware Version: %s\r\n", fw_version.fw_version);
+    if (ret)
+        goto err_lmac_reqs;
+    fw_version_len = min_t(size_t, fw_version.fw_version_len,
+                           sizeof(fw_version.fw_version));
+    fw_version_len = min_t(size_t, fw_version_len,
+                           sizeof(wiphy->fw_version) - 1);
+    memcpy(wiphy->fw_version, fw_version.fw_version, fw_version_len);
+    wiphy->fw_version[fw_version_len] = '\0';
+    AICWFDBG(LOGINFO, "Firmware Version: %.*s\r\n",
+             (int)fw_version_len, fw_version.fw_version);
 
     wiphy->bands[NL80211_BAND_2GHZ] = &rwnx_band_2GHz;
 //#ifdef USE_5G
@@ -9238,8 +9232,8 @@ static int __init rwnx_mod_init(void)
     rwnx_print_version();
 	AICWFDBG(LOGINFO, "RELEASE DATE:%s \r\n", RELEASE_DATE);
 	AICWFDBG(LOGINFO,
-	         "conn_txn_revision=4 log_schema=3 runtime_stats=1 log_mask=0x%x timeout_ms=12000 late_disconnect_guard_ms=1500 roam_carrier_preserve=1\r\n",
-	         READ_ONCE(aicwf_dbg_level));
+	         "conn_txn_revision=4 log_schema=4 runtime_stats=1 dkms_version=%s log_mask=0x%x timeout_ms=12000 late_disconnect_guard_ms=1500 roam_carrier_preserve=1\r\n",
+	         AIC_DKMS_VERSION, READ_ONCE(aicwf_dbg_level));
 	rwnx_init_cmd_array();
 
 	sema_init(&aicwf_deinit_sem, 1);
@@ -9299,5 +9293,6 @@ MODULE_FIRMWARE(RWNX_CONFIG_FW_NAME);
 
 MODULE_DESCRIPTION(RW_DRV_DESCRIPTION);
 MODULE_VERSION(RWNX_VERS_MOD);
+MODULE_INFO(dkms_version, AIC_DKMS_VERSION);
 MODULE_AUTHOR(RW_DRV_COPYRIGHT " " RW_DRV_AUTHOR);
 MODULE_LICENSE("GPL");

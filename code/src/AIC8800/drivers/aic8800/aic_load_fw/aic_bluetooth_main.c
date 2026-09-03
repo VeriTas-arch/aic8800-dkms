@@ -1,4 +1,5 @@
 #include <linux/module.h>
+#include "../aic_dkms_version.h"
 #include <linux/inetdevice.h>
 #include "aicwf_usb.h"
 #include "rwnx_version_gen.h"
@@ -67,5 +68,6 @@ module_exit(aic_bluetooth_mod_exit);
 MODULE_FIRMWARE(DRV_CONFIG_FW_NAME);
 MODULE_DESCRIPTION(DRV_DESCRIPTION);
 MODULE_VERSION(DRV_VERS_MOD);
+MODULE_INFO(dkms_version, AIC_DKMS_VERSION);
 MODULE_AUTHOR(DRV_COPYRIGHT " " DRV_AUTHOR);
 MODULE_LICENSE("GPL");

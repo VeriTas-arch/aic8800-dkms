@@ -89,6 +89,7 @@ int aicwf_bus_init(uint bus_hdrlen, struct device *dev)
         return -1;
     }
     bus_if = dev_get_drvdata(dev);
+    mutex_init(&bus_if->cmd_buf_lock);
     #if defined CONFIG_USB_SUPPORT && defined CONFIG_USB_NO_TRANS_DMA_MAP
     #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 35))
     bus_if->cmd_buf = usb_alloc_coherent(bus_if->bus_priv.usb->udev, CMD_BUF_MAX, (in_interrupt() ? GFP_ATOMIC : GFP_KERNEL), &bus_if->bus_priv.usb->cmd_dma_trans_addr);
@@ -224,6 +225,9 @@ void aicwf_bus_deinit(struct device *dev)
     if (usb)
         aicwf_usb_cancel_all_urbs(usb);
 
+    if (usb && usb->cmd_mgr.state != RWNX_CMD_MGR_STATE_DEINIT)
+        rwnx_cmd_mgr_deinit(&usb->cmd_mgr);
+
     if (usb && usb->rwnx_hw && g_rwnx_plat && g_rwnx_plat->enabled) {
         rwnx_platform_deinit(usb->rwnx_hw);
         usb->rwnx_hw = NULL;
@@ -321,7 +325,7 @@ void aicwf_tx_deinit(struct aicwf_tx_priv* tx_priv)
 #ifdef AICWF_USB_SUPPORT
 static bool aicwf_usb_rx_frame_valid(struct aicwf_rx_priv *rx_priv,
                                      const u8 *data, size_t data_len,
-                                     u16 *pkt_len)
+                                     u16 *pkt_len, bool msg_endpoint)
 {
     struct rwnx_hw *rwnx_hw = NULL;
     size_t required_len;
@@ -331,10 +335,15 @@ static bool aicwf_usb_rx_frame_valid(struct aicwf_rx_priv *rx_priv,
         rwnx_hw = rx_priv->usbdev->rwnx_hw;
 
     if (!data || data_len < 4) {
-        if (rwnx_hw)
-            atomic_inc(&rwnx_hw->runtime_stats.usb_rx_short_frames);
+        if (rwnx_hw) {
+            if (msg_endpoint)
+                atomic_inc(&rwnx_hw->runtime_stats.usb_msg_rx_invalid_lengths);
+            else
+                atomic_inc(&rwnx_hw->runtime_stats.usb_rx_short_frames);
+        }
         AICWFDBG_RATELIMITED(LOGERROR,
-                             "USB RX short frame len:%zu\n", data_len);
+                             "USB%s RX short frame len:%zu\n",
+                             msg_endpoint ? " MSG" : "", data_len);
         return false;
     }
 
@@ -345,11 +354,16 @@ static bool aicwf_usb_rx_frame_valid(struct aicwf_rx_priv *rx_priv,
 
     if (!*pkt_len || (!is_config && *pkt_len > 1600) ||
         required_len > data_len) {
-        if (rwnx_hw)
-            atomic_inc(&rwnx_hw->runtime_stats.usb_rx_invalid_lengths);
+        if (rwnx_hw) {
+            if (msg_endpoint)
+                atomic_inc(&rwnx_hw->runtime_stats.usb_msg_rx_invalid_lengths);
+            else
+                atomic_inc(&rwnx_hw->runtime_stats.usb_rx_invalid_lengths);
+        }
         AICWFDBG_RATELIMITED(LOGERROR,
-                             "USB RX invalid length pkt:%u available:%zu type:0x%x\n",
-                             *pkt_len, data_len, data[2] & 0x7f);
+                             "USB%s RX invalid length pkt:%u available:%zu type:0x%x\n",
+                             msg_endpoint ? " MSG" : "", *pkt_len,
+                             data_len, data[2] & 0x7f);
         return false;
     }
 
@@ -358,12 +372,14 @@ static bool aicwf_usb_rx_frame_valid(struct aicwf_rx_priv *rx_priv,
 #endif
 
 #if defined(AICWF_SDIO_SUPPORT) || defined(CONFIG_USB_RX_AGGR)
+#define AICWF_RX_AGGR_MAX_PACKETS 64
+
 static bool aicwf_another_ptk(struct sk_buff *skb)
 {
     u8 *data;
     u16 aggr_len = 0;
 
-    if(skb->data == NULL || skb->len == 0) {
+    if (!skb || !skb->data || skb->len < 4) {
         return false;
     }
     data = skb->data;
@@ -408,13 +424,13 @@ int aicwf_tasklet_rxframes(struct aicwf_rx_priv *rx_priv)
 				break;
 			}
 			data = skb->data;
-			pkt_len = (*skb->data | (*(skb->data + 1) << 8));
-			//printk("p:%d, s:%d , %x\n", pkt_len, skb->len, data[2]);
-			if (pkt_len > 1600) {
+			if (!aicwf_usb_rx_frame_valid(rx_priv, data, skb->len,
+						      &pkt_len, false)) {
 				dev_kfree_skb(skb);
 				atomic_dec(&rx_priv->rx_cnt);
-					continue;
+				continue;
 			}
+			//printk("p:%d, s:%d , %x\n", pkt_len, skb->len, data[2]);
 	
 			if((skb->data[2] & USB_TYPE_CFG) != USB_TYPE_CFG) { // type : data
 #if 0
@@ -486,6 +502,7 @@ int aicwf_process_rxframes(struct aicwf_rx_priv *rx_priv)
     u16 aggr_len = 0, adjust_len = 0;
     u8 *data = NULL;
     u8_l *msg = NULL;
+    unsigned int cnt;
 
     while (1) {
         spin_lock_irqsave(&rx_priv->rxqlock, flags);
@@ -499,7 +516,13 @@ int aicwf_process_rxframes(struct aicwf_rx_priv *rx_priv)
             txrx_err("skb_error\r\n");
             break;
         }
-        while(aicwf_another_ptk(skb)) {
+        cnt = 0;
+        while (aicwf_another_ptk(skb)) {
+            if (++cnt > AICWF_RX_AGGR_MAX_PACKETS) {
+                AICWFDBG_RATELIMITED(LOGERROR,
+                                     "SDIO RX aggregate packet limit exceeded\n");
+                break;
+            }
             data = skb->data;
             pkt_len = (*skb->data | (*(skb->data + 1) << 8));
 
@@ -510,6 +533,15 @@ int aicwf_process_rxframes(struct aicwf_rx_priv *rx_priv)
                     adjust_len = roundup(aggr_len, RX_ALIGNMENT);
                 else
                     adjust_len = aggr_len;
+
+                if (!pkt_len || aggr_len < pkt_len ||
+                    adjust_len > skb->len) {
+                    AICWFDBG_RATELIMITED(
+                        LOGERROR,
+                        "SDIO RX invalid data length pkt:%u available:%u\n",
+                        pkt_len, skb->len);
+                    break;
+                }
 
                 skb_inblock = __dev_alloc_skb(aggr_len + CCMP_OR_WEP_INFO, GFP_KERNEL);
                 if(skb_inblock == NULL){
@@ -530,6 +562,14 @@ int aicwf_process_rxframes(struct aicwf_rx_priv *rx_priv)
                     adjust_len = roundup(aggr_len, RX_ALIGNMENT);
                 else
                     adjust_len = aggr_len;
+
+                if (!pkt_len || adjust_len > skb->len - 4) {
+                    AICWFDBG_RATELIMITED(
+                        LOGERROR,
+                        "SDIO RX invalid config length pkt:%u available:%u\n",
+                        pkt_len, skb->len);
+                    break;
+                }
 
                 msg = kmalloc(aggr_len+4, GFP_KERNEL);
                 if(msg == NULL){
@@ -572,7 +612,7 @@ int aicwf_process_rxframes(struct aicwf_rx_priv *rx_priv)
     u8_l *msg = NULL;
 #ifdef CONFIG_USB_RX_AGGR
     struct sk_buff *skb_inblock = NULL;
-    u8 cnt = 0 ;
+    unsigned int cnt;
 #endif
 #ifdef CONFIG_PREALLOC_RX_SKB
     struct rx_buff *buffer = NULL;
@@ -593,7 +633,7 @@ int aicwf_process_rxframes(struct aicwf_rx_priv *rx_priv)
         }
         data = buffer->data;
         if (!aicwf_usb_rx_frame_valid(rx_priv, data, buffer->len,
-                                      &pkt_len)) {
+                                      &pkt_len, false)) {
             aicwf_prealloc_rxbuff_free(buffer, &rx_priv->rxbuff_lock);
             atomic_dec(&rx_priv->rx_cnt);
             continue;
@@ -669,15 +709,19 @@ int aicwf_process_rxframes(struct aicwf_rx_priv *rx_priv)
             break;
         }
         #ifdef CONFIG_USB_RX_AGGR
-        while(aicwf_another_ptk(skb)) {
-        cnt++;
-        if (cnt > 30) {
-            //printk("%s err, break %d\n", __func__, cnt);
-            //break;
+        cnt = 0;
+        while (aicwf_another_ptk(skb)) {
+        if (++cnt > AICWF_RX_AGGR_MAX_PACKETS) {
+            if (rx_priv->usbdev->rwnx_hw)
+                atomic_inc(&rx_priv->usbdev->rwnx_hw->runtime_stats.usb_rx_invalid_lengths);
+            AICWFDBG_RATELIMITED(LOGERROR,
+                                 "USB RX aggregate packet limit exceeded\n");
+            break;
         }
         #endif
         data = skb->data;
-        if (!aicwf_usb_rx_frame_valid(rx_priv, data, skb->len, &pkt_len)) {
+        if (!aicwf_usb_rx_frame_valid(rx_priv, data, skb->len, &pkt_len,
+                                      false)) {
 #ifdef CONFIG_USB_RX_AGGR
             break;
 #else
@@ -732,6 +776,16 @@ int aicwf_process_rxframes(struct aicwf_rx_priv *rx_priv)
                 adjust_len = roundup(aggr_len, RX_ALIGNMENT);
             else
                 adjust_len = aggr_len;
+
+            if (adjust_len > skb->len - 4) {
+                if (rx_priv->usbdev->rwnx_hw)
+                    atomic_inc(&rx_priv->usbdev->rwnx_hw->runtime_stats.usb_rx_invalid_lengths);
+                AICWFDBG_RATELIMITED(
+                    LOGERROR,
+                    "USB RX invalid aggregate config padding pkt:%u available:%u\n",
+                    pkt_len, skb->len);
+                break;
+            }
 
             msg = kmalloc(aggr_len+4, GFP_KERNEL);
             if(msg == NULL){
@@ -799,7 +853,8 @@ int aicwf_process_msg_rxframes(struct aicwf_rx_priv *rx_priv)
             break;
         }
         data = skb->data;
-        if (!aicwf_usb_rx_frame_valid(rx_priv, data, skb->len, &pkt_len)) {
+        if (!aicwf_usb_rx_frame_valid(rx_priv, data, skb->len, &pkt_len,
+                                      true)) {
             dev_kfree_skb(skb);
             atomic_dec(&rx_priv->msg_rx_cnt);
             continue;
@@ -1194,7 +1249,8 @@ void rxbuff_free(struct rx_buff *rxbuff)
    kfree(rxbuff);
 }
 
-struct rx_buff *rxbuff_queue_penq(struct rx_frame_queue *pq, struct rx_buff *p)
+static struct rx_buff *rxbuff_queue_penq(struct rx_frame_queue *pq,
+                                         struct rx_buff *p)
 {
 
     struct list_head *q;

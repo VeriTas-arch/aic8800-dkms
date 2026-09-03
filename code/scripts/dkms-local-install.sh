@@ -35,6 +35,64 @@ require_cmd() {
     fi
 }
 
+dkms_registered() {
+    dkms status -m "$MODULE_NAME" -v "$VERSION" 2>/dev/null |
+        grep -Fq "$MODULE_NAME/$VERSION"
+}
+
+rollback_dkms() {
+    local rollback_failed=0
+
+    ROLLBACK_RUNNING=1
+    set +e
+    warn "Install failed; restoring previous DKMS source and state"
+    if dkms_registered; then
+        sudo dkms remove -m "$MODULE_NAME" -v "$VERSION" --all ||
+            rollback_failed=1
+    fi
+    sudo rm -rf -- "$DKMS_SRC_DIR" || rollback_failed=1
+    if ((HAD_DKMS_SOURCE)); then
+        sudo mkdir -p "$DKMS_SRC_DIR" || rollback_failed=1
+        sudo tar -C "$DKMS_SRC_DIR" -xpf "$DKMS_BACKUP" ||
+            rollback_failed=1
+    fi
+
+    if ((HAD_DKMS_REGISTRATION)); then
+        sudo dkms add -m "$MODULE_NAME" -v "$VERSION" ||
+            rollback_failed=1
+        if [[ "$PREVIOUS_DKMS_STATE" == built ||
+              "$PREVIOUS_DKMS_STATE" == installed ]]; then
+            sudo dkms build -m "$MODULE_NAME" -v "$VERSION" \
+                -k "$KERNEL_VER" || rollback_failed=1
+        fi
+        if [[ "$PREVIOUS_DKMS_STATE" == installed ]]; then
+            sudo dkms install -m "$MODULE_NAME" -v "$VERSION" \
+                -k "$KERNEL_VER" --force || rollback_failed=1
+        fi
+    fi
+
+    if ((rollback_failed)); then
+        error "automatic DKMS rollback was incomplete; inspect 'dkms status'"
+    else
+        info "Previous DKMS state restored"
+    fi
+    set -e
+}
+
+on_exit() {
+    local status=$?
+
+    trap - EXIT
+    if ((status != 0 && MUTATION_ACTIVE && !ROLLBACK_RUNNING)); then
+        rollback_dkms
+    fi
+    if [[ -n "${BACKUP_ROOT:-}" && -d "$BACKUP_ROOT" &&
+          "$BACKUP_ROOT" == "$BACKUP_PARENT"/aic-dkms-install.* ]]; then
+        rm -rf -- "$BACKUP_ROOT"
+    fi
+    exit "$status"
+}
+
 if [[ $# -gt 1 ]]; then
     usage
     exit 1
@@ -50,6 +108,7 @@ KERNEL_VER="${1:-$(uname -r)}"
 RULES_SRC="$REPO_ROOT/src/AIC8800/aic.rules"
 RULES_DST="/etc/udev/rules.d/aic.rules"
 BUILD_TEST="$REPO_ROOT/scripts/build-test.sh"
+VERSION_CHECK="$REPO_ROOT/scripts/sync-version.sh"
 
 if [[ ! -f "$VERSION_FILE" ]]; then
     error "VERSION file not found: $VERSION_FILE"
@@ -62,8 +121,12 @@ if [[ ! -d "$SOURCE_DIR" ]]; then
 fi
 
 require_cmd dkms
+require_cmd grep
+require_cmd mktemp
+require_cmd modinfo
 require_cmd sha256sum
 require_cmd sudo
+require_cmd tar
 require_cmd udevadm
 
 VERSION="$(<"$VERSION_FILE")"
@@ -72,12 +135,47 @@ if [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+)*([.-][0-9A-Za-z]+)*$ ]]; then
     exit 1
 fi
 
+if [[ ! "$KERNEL_VER" =~ ^[0-9A-Za-z._+-]+$ ]]; then
+    error "invalid kernel version: $KERNEL_VER"
+    exit 2
+fi
 if [[ ! -d "/lib/modules/$KERNEL_VER/build" ]]; then
     error "kernel headers not found for $KERNEL_VER (/lib/modules/$KERNEL_VER/build)"
     exit 1
 fi
 
 DKMS_SRC_DIR="/usr/src/${MODULE_NAME}-${VERSION}"
+if [[ ! "$DKMS_SRC_DIR" =~ ^/usr/src/aic8800fdrv-[0-9A-Za-z.-]+$ ]]; then
+    error "unsafe DKMS source path: $DKMS_SRC_DIR"
+    exit 1
+fi
+
+info "Check version metadata"
+"$VERSION_CHECK" --check
+
+mapfile -t existing_status < <(
+    dkms status -m "$MODULE_NAME" -v "$VERSION" 2>/dev/null
+)
+TARGET_REGISTERED=0
+HAD_DKMS_REGISTRATION=0
+PREVIOUS_DKMS_STATE=added
+if ((${#existing_status[@]})); then
+    HAD_DKMS_REGISTRATION=1
+fi
+for status_line in "${existing_status[@]}"; do
+    if [[ "$status_line" == "$MODULE_NAME/$VERSION, "* ]]; then
+        status_tail=${status_line#"$MODULE_NAME/$VERSION, "}
+        registered_kernel=${status_tail%%,*}
+        if [[ "$registered_kernel" == "$KERNEL_VER" ]]; then
+            TARGET_REGISTERED=1
+            PREVIOUS_DKMS_STATE=${status_line##*: }
+        else
+            error "$MODULE_NAME/$VERSION is also registered for $registered_kernel"
+            error "use dkms-refresh-all-kernels.sh so one source version cannot diverge between kernels"
+            exit 2
+        fi
+    fi
+done
 
 info "Preflight compile for $KERNEL_VER"
 "$BUILD_TEST" "$KERNEL_VER"
@@ -90,19 +188,42 @@ else
     exit 1
 fi
 
+BACKUP_PARENT="${TMPDIR:-/tmp}"
+if [[ ! -d "$BACKUP_PARENT" ]]; then
+    error "temporary directory not found: $BACKUP_PARENT"
+    exit 1
+fi
+BACKUP_PARENT="$(cd "$BACKUP_PARENT" && pwd -P)"
+BACKUP_ROOT="$(mktemp -d "$BACKUP_PARENT/aic-dkms-install.XXXXXX")"
+DKMS_BACKUP="$BACKUP_ROOT/source.tar"
+HAD_DKMS_SOURCE=0
+MUTATION_ACTIVE=0
+ROLLBACK_RUNNING=0
+trap on_exit EXIT
+
+if [[ -d "$DKMS_SRC_DIR" ]]; then
+    HAD_DKMS_SOURCE=1
+    info "Back up current DKMS source"
+    sudo tar -C "$DKMS_SRC_DIR" -cpf - . >"$DKMS_BACKUP"
+fi
+
 info "Module: $MODULE_NAME"
 info "Version: $VERSION"
 info "Kernel : $KERNEL_VER"
 info "Copy source to: $DKMS_SRC_DIR"
 
-sudo rm -rf "$DKMS_SRC_DIR"
+MUTATION_ACTIVE=1
+sudo rm -rf -- "$DKMS_SRC_DIR"
 sudo mkdir -p "$DKMS_SRC_DIR"
 sudo cp -a "$SOURCE_DIR/." "$DKMS_SRC_DIR/"
 sudo sed -i "s/^PACKAGE_VERSION=.*/PACKAGE_VERSION=\"$VERSION\"/" "$DKMS_SRC_DIR/dkms.conf"
 
 info "Refresh DKMS state for target kernel"
-sudo dkms remove -m "$MODULE_NAME" -v "$VERSION" -k "$KERNEL_VER" \
-    >/dev/null 2>&1 || true
+if ((TARGET_REGISTERED)); then
+    sudo dkms remove -m "$MODULE_NAME" -v "$VERSION" -k "$KERNEL_VER"
+else
+    info "No existing DKMS build for $MODULE_NAME/$VERSION on $KERNEL_VER"
+fi
 cleanup_legacy_module_dirs
 
 if dkms status -m "$MODULE_NAME" -v "$VERSION" 2>/dev/null |
@@ -119,10 +240,35 @@ sudo dkms build -m "$MODULE_NAME" -v "$VERSION" -k "$KERNEL_VER"
 info "dkms install"
 sudo dkms install -m "$MODULE_NAME" -v "$VERSION" -k "$KERNEL_VER"
 
+info "Verify installed modules"
+status="$(dkms status -m "$MODULE_NAME" -v "$VERSION" -k "$KERNEL_VER")"
+if [[ "$status" != *": installed" ]]; then
+    error "DKMS status is not installed for $KERNEL_VER: ${status:-<empty>}"
+    exit 2
+fi
+for module in aic8800_fdrv aic_load_fw; do
+    module_path="$(modinfo -k "$KERNEL_VER" -n "$module")"
+    vermagic="$(modinfo -k "$KERNEL_VER" -F vermagic "$module")"
+    module_version="$(modinfo -k "$KERNEL_VER" -F dkms_version "$module")"
+    if [[ "$module_path" != "/lib/modules/$KERNEL_VER/updates/dkms/"* ]]; then
+        error "unexpected module path for $module: $module_path"
+        exit 2
+    fi
+    if [[ "$vermagic" != "$KERNEL_VER "* ]]; then
+        error "unexpected vermagic for $module: $vermagic"
+        exit 2
+    fi
+    if [[ "$module_version" != "$VERSION" ]]; then
+        error "unexpected DKMS version for $module: ${module_version:-<missing>}"
+        exit 2
+    fi
+done
+
 info "Install firmware files"
 if [[ -d "$FW_SRC_DIR" ]]; then
     sudo install -d -m 0755 "$FW_DST_DIR"
     sudo cp -a "$FW_SRC_DIR/." "$FW_DST_DIR/"
+    (cd "$FW_DST_DIR" && sha256sum -c "$FW_SRC_DIR/SHA256SUMS")
 else
     warn "firmware source not found: $FW_SRC_DIR"
 fi
@@ -139,6 +285,7 @@ fi
 info "Remove old usb-storage quirk config if exists"
 sudo rm -f /etc/modprobe.d/aic8800-usb-storage-quirks.conf
 
+MUTATION_ACTIVE=0
 echo "[OK] DKMS install completed"
 echo "[NEXT] Check status: dkms status | grep $MODULE_NAME"
 echo "[NEXT] Replug dongle, then load: sudo modprobe aic_load_fw && sudo modprobe aic8800_fdrv"

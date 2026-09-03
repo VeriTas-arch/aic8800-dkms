@@ -597,16 +597,30 @@ static ssize_t rwnx_dbgfs_runtime_stats_read(struct file *file,
 {
     struct rwnx_hw *priv = file->private_data;
     struct rwnx_runtime_stats *stats = &priv->runtime_stats;
-    const size_t bufsz = 2048;
+    const size_t bufsz = 4096;
     char *buf;
     int len;
     ssize_t read;
+    u64 uptime_ms;
 
     buf = kmalloc(bufsz, GFP_KERNEL);
     if (!buf)
         return -ENOMEM;
 
-    len = rwnx_conn_guard_stats_format(buf, bufsz);
+    uptime_ms = jiffies64_to_msecs(get_jiffies_64() -
+                                   stats->started_jiffies);
+    len = scnprintf(buf, bufsz,
+                    "schema_version=2\n"
+                    "conn_guard_scope=module_lifetime\n"
+                    "runtime_scope=device_generation\n"
+                    "device_generation=%u\n"
+                    "device_uptime_ms=%llu\n",
+                    stats->device_generation,
+                    (unsigned long long)uptime_ms);
+    len += rwnx_conn_guard_stats_format(buf + len, bufsz - len);
+    len += scnprintf(buf + len, bufsz - len,
+                     "conn_firmware_rejects=%d\n",
+                     atomic_read(&stats->conn_firmware_rejects));
     len += scnprintf(buf + len, bufsz - len,
                      "cqm_rssi_low_events=%d\n",
                      atomic_read(&stats->cqm_rssi_low_events));
@@ -656,14 +670,41 @@ static ssize_t rwnx_dbgfs_runtime_stats_read(struct file *file,
                      "usb_rx_invalid_lengths=%d\n",
                      atomic_read(&stats->usb_rx_invalid_lengths));
     len += scnprintf(buf + len, bufsz - len,
+                     "usb_msg_rx_submit_failures=%d\n",
+                     atomic_read(&stats->usb_msg_rx_submit_failures));
+    len += scnprintf(buf + len, bufsz - len,
+                     "usb_msg_rx_refill_failures=%d\n",
+                     atomic_read(&stats->usb_msg_rx_refill_failures));
+    len += scnprintf(buf + len, bufsz - len,
+                     "usb_msg_rx_state_rejects=%d\n",
+                     atomic_read(&stats->usb_msg_rx_state_rejects));
+    len += scnprintf(buf + len, bufsz - len,
+                     "usb_msg_rx_completion_errors=%d\n",
+                     atomic_read(&stats->usb_msg_rx_completion_errors));
+    len += scnprintf(buf + len, bufsz - len,
+                     "usb_msg_rx_terminal_errors=%d\n",
+                     atomic_read(&stats->usb_msg_rx_terminal_errors));
+    len += scnprintf(buf + len, bufsz - len,
+                     "usb_msg_rx_invalid_lengths=%d\n",
+                     atomic_read(&stats->usb_msg_rx_invalid_lengths));
+    len += scnprintf(buf + len, bufsz - len,
+                     "usb_msg_rx_queue_overflows=%d\n",
+                     atomic_read(&stats->usb_msg_rx_queue_overflows));
+    len += scnprintf(buf + len, bufsz - len,
                      "usb_tx_submit_failures=%d\n",
                      atomic_read(&stats->usb_tx_submit_failures));
     len += scnprintf(buf + len, bufsz - len,
                      "usb_tx_completion_errors=%d\n",
                      atomic_read(&stats->usb_tx_completion_errors));
     len += scnprintf(buf + len, bufsz - len,
+                     "usb_msg_tx_submit_failures=%d\n",
+                     atomic_read(&stats->usb_msg_tx_submit_failures));
+    len += scnprintf(buf + len, bufsz - len,
                      "usb_msg_tx_completion_errors=%d\n",
                      atomic_read(&stats->usb_msg_tx_completion_errors));
+    len += scnprintf(buf + len, bufsz - len,
+                     "usb_msg_tx_state_rejects=%d\n",
+                     atomic_read(&stats->usb_msg_tx_state_rejects));
     len += scnprintf(buf + len, bufsz - len,
                      "usb_tx_no_buffers=%d\n",
                      atomic_read(&stats->usb_tx_no_buffers));
@@ -676,6 +717,30 @@ static ssize_t rwnx_dbgfs_runtime_stats_read(struct file *file,
     len += scnprintf(buf + len, bufsz - len,
                      "usb_flow_wakes=%d\n",
                      atomic_read(&stats->usb_flow_wakes));
+    len += scnprintf(buf + len, bufsz - len,
+                     "cmd_alloc_failures=%d\n",
+                     atomic_read(&stats->cmd_alloc_failures));
+    len += scnprintf(buf + len, bufsz - len,
+                     "cmd_pool_high_water=%d\n",
+                     atomic_read(&stats->cmd_pool_high_water));
+    len += scnprintf(buf + len, bufsz - len,
+                     "cmd_atomic_rejects=%d\n",
+                     atomic_read(&stats->cmd_atomic_rejects));
+    len += scnprintf(buf + len, bufsz - len,
+                     "cmd_bus_down_rejects=%d\n",
+                     atomic_read(&stats->cmd_bus_down_rejects));
+    len += scnprintf(buf + len, bufsz - len,
+                     "cmd_tx_failures=%d\n",
+                     atomic_read(&stats->cmd_tx_failures));
+    len += scnprintf(buf + len, bufsz - len,
+                     "cmd_timeouts=%d\n",
+                     atomic_read(&stats->cmd_timeouts));
+    len += scnprintf(buf + len, bufsz - len,
+                     "cmd_cfm_before_push=%d\n",
+                     atomic_read(&stats->cmd_cfm_before_push));
+    len += scnprintf(buf + len, bufsz - len,
+                     "cmd_cfm_oversize=%d\n",
+                     atomic_read(&stats->cmd_cfm_oversize));
     len += scnprintf(buf + len, bufsz - len,
                      "fw_msg_invalid=%d\n",
                      atomic_read(&stats->fw_msg_invalid));

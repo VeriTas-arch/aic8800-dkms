@@ -537,7 +537,7 @@ static void aicwf_usb_msg_rx_complete(struct urb *urb)
     if (urb->actual_length > urb->transfer_buffer_length) {
         aicwf_dev_skb_free(skb);
         aicwf_usb_msg_rx_buf_put(usb_dev, usb_buf);
-        AICWF_USB_STAT_INC(usb_dev, usb_rx_invalid_lengths);
+        AICWF_USB_STAT_INC(usb_dev, usb_msg_rx_invalid_lengths);
         aicwf_usb_schedule_msg_rx_refill(usb_dev, 0);
         return;
     }
@@ -547,9 +547,9 @@ static void aicwf_usb_msg_rx_complete(struct urb *urb)
         aicwf_usb_msg_rx_buf_put(usb_dev, usb_buf);
 
 		if (urb->status) {
-            AICWF_USB_STAT_INC(usb_dev, usb_rx_completion_errors);
+            AICWF_USB_STAT_INC(usb_dev, usb_msg_rx_completion_errors);
             if (aicwf_usb_status_terminal(urb->status)) {
-                AICWF_USB_STAT_INC(usb_dev, usb_rx_terminal_errors);
+                AICWF_USB_STAT_INC(usb_dev, usb_msg_rx_terminal_errors);
                 return;
             }
             AICWFDBG_RATELIMITED(LOGERROR,
@@ -569,7 +569,7 @@ static void aicwf_usb_msg_rx_complete(struct urb *urb)
         spin_lock_irqsave(&rx_priv->msg_rxqlock, flags);
         if(!aicwf_rxframe_enqueue(usb_dev->dev, &rx_priv->msg_rxq, skb)){
             spin_unlock_irqrestore(&rx_priv->msg_rxqlock, flags);
-            AICWF_USB_STAT_INC(usb_dev, usb_rx_queue_overflows);
+            AICWF_USB_STAT_INC(usb_dev, usb_msg_rx_queue_overflows);
             AICWFDBG_RATELIMITED(LOGERROR,
                                  "USB message RX queue overflow\n");
             aicwf_dev_skb_free(skb);
@@ -734,7 +734,7 @@ static int aicwf_usb_submit_msg_rx_urb(struct aic_usb_dev *usb_dev,
         return -EINVAL;
 
     if (usb_dev->state != USB_UP_ST) {
-        AICWF_USB_STAT_INC(usb_dev, usb_rx_state_rejects);
+        AICWF_USB_STAT_INC(usb_dev, usb_msg_rx_state_rejects);
         AICWFDBG_RATELIMITED(LOGERROR,
                              "USB message RX rejected in state:%d\n",
                              usb_dev->state);
@@ -760,7 +760,7 @@ static int aicwf_usb_submit_msg_rx_urb(struct aic_usb_dev *usb_dev,
     usb_anchor_urb(usb_buf->urb, &usb_dev->msg_rx_submitted);
     ret = usb_submit_urb(usb_buf->urb, GFP_ATOMIC);
     if (ret) {
-        AICWF_USB_STAT_INC(usb_dev, usb_rx_submit_failures);
+        AICWF_USB_STAT_INC(usb_dev, usb_msg_rx_submit_failures);
         AICWFDBG_RATELIMITED(LOGERROR,
                              "USB message RX submit failed:%d\n", ret);
         usb_unanchor_urb(usb_buf->urb);
@@ -778,7 +778,7 @@ static void aicwf_usb_msg_rx_submit_all_urb(struct aic_usb_dev *usb_dev)
     struct aicwf_usb_buf *usb_buf;
 
     if (usb_dev->state != USB_UP_ST) {
-        AICWF_USB_STAT_INC(usb_dev, usb_rx_state_rejects);
+        AICWF_USB_STAT_INC(usb_dev, usb_msg_rx_state_rejects);
         AICWFDBG_RATELIMITED(LOGERROR,
                              "USB message RX refill rejected in state:%d\n",
                              usb_dev->state);
@@ -787,7 +787,7 @@ static void aicwf_usb_msg_rx_submit_all_urb(struct aic_usb_dev *usb_dev)
 
     while((usb_buf = aicwf_usb_msg_rx_buf_get(usb_dev)) != NULL) {
         if (aicwf_usb_submit_msg_rx_urb(usb_dev, usb_buf)) {
-            AICWF_USB_STAT_INC(usb_dev, usb_rx_refill_failures);
+            AICWF_USB_STAT_INC(usb_dev, usb_msg_rx_refill_failures);
             AICWFDBG_RATELIMITED(LOGERROR,
                                  "USB message RX refill failed\n");
             if (usb_dev->state != USB_UP_ST)
@@ -1277,7 +1277,8 @@ static int aicwf_usb_bus_txmsg(struct device *dev, u8 *buf, u32 len)
     mutex_lock(&usb_dev->msg_tx_lock);
 
     if (usb_dev->state != USB_UP_ST) {
-        ret = -EIO;
+        AICWF_USB_STAT_INC(usb_dev, usb_msg_tx_state_rejects);
+        ret = -ESHUTDOWN;
         goto exit;
     }
 
@@ -1310,6 +1311,7 @@ static int aicwf_usb_bus_txmsg(struct device *dev, u8 *buf, u32 len)
 
     ret = usb_submit_urb(usb_dev->msg_out_urb, GFP_ATOMIC);
     if (ret) {
+        AICWF_USB_STAT_INC(usb_dev, usb_msg_tx_submit_failures);
         usb_err("usb_submit_urb failed %d\n", ret);
         goto exit;
     }
@@ -2060,10 +2062,12 @@ static int aicwf_parse_usb(struct aic_usb_dev *usb_dev, struct usb_interface *in
 		}
 #endif
 
-    if (usb->speed == USB_SPEED_HIGH){
-		AICWFDBG(LOGINFO, "Aic high speed USB device detected\n");
-    }else{
-    	AICWFDBG(LOGINFO, "Aic high speed USB device detected\n");
+    if (usb->speed == USB_SPEED_HIGH) {
+        AICWFDBG(LOGINFO, "Aic high speed USB device detected\n");
+    } else {
+        AICWFDBG(LOGINFO,
+                 "Aic non-high-speed USB device detected (speed=%u)\n",
+                 usb->speed);
     }
 
     exit:
@@ -2227,7 +2231,7 @@ static int aicwf_usb_probe(struct usb_interface *intf, const struct usb_device_i
     if(!rx_priv) {
        AICWFDBG(LOGERROR, "rx init failed\n");
         ret = -ENOMEM;
-        goto out_free_bus;
+        goto out_free_privs;
     }
     usb_dev->rx_priv = rx_priv;
 
@@ -2236,7 +2240,7 @@ static int aicwf_usb_probe(struct usb_interface *intf, const struct usb_device_i
     if(!tx_priv) {
         usb_err("tx init fail\n");
         ret = -ENOMEM;
-        goto out_free_bus;
+        goto out_free_privs;
     }
     usb_dev->tx_priv = tx_priv;
     aicwf_frame_queue_init(&tx_priv->txq, 8, TXQLEN);
@@ -2247,19 +2251,19 @@ static int aicwf_usb_probe(struct usb_interface *intf, const struct usb_device_i
     ret = aicwf_bus_init(0, dev);
     if (ret < 0) {
         AICWFDBG(LOGERROR, "aicwf_bus_init err %d\n", ret);
-        goto out_free_bus;
+        goto out_free_privs;
     }
 
     ret = aicwf_bus_start(bus_if);
     if (ret < 0) {
         AICWFDBG(LOGERROR, "aicwf_bus_start err %d\n", ret);
-        goto out_free_bus;
+        goto out_deinit_bus;
     }
 
     ret = aicwf_rwnx_usb_platform_init(usb_dev);
 	if (ret < 0) {
         AICWFDBG(LOGERROR, "aicwf_rwnx_usb_platform_init err %d\n", ret);
-        goto out_free_bus;
+        goto out_deinit_bus;
     }
     aicwf_hostif_ready();
 
@@ -2269,8 +2273,17 @@ static int aicwf_usb_probe(struct usb_interface *intf, const struct usb_device_i
 
     return 0;
 
-out_free_bus:
+out_deinit_bus:
     aicwf_bus_deinit(dev);
+out_free_privs:
+#ifdef CONFIG_USB_TX_AGGR
+    if (tx_priv)
+        aicwf_tx_deinit(tx_priv);
+#endif
+    if (rx_priv)
+        aicwf_rx_deinit(rx_priv);
+    dev_set_drvdata(dev, NULL);
+    usb_dev->bus_if = NULL;
     kfree(bus_if);
 out_free_usb:
     aicwf_usb_deinit(usb_dev);
@@ -2279,6 +2292,82 @@ out_free:
     kfree(usb_dev);
     usb_set_intfdata(intf, NULL);
     return ret;
+}
+
+static void aicwf_usb_log_runtime_end(struct aic_usb_dev *usb_dev)
+{
+    struct rwnx_hw *rwnx_hw = usb_dev->rwnx_hw;
+    struct rwnx_runtime_stats *stats;
+    u64 uptime_ms;
+
+    if (!rwnx_hw)
+        return;
+    stats = &rwnx_hw->runtime_stats;
+    uptime_ms = jiffies64_to_msecs(get_jiffies_64() -
+                                   stats->started_jiffies);
+    AICWFDBG(LOGINFO,
+             "runtime_instance_end generation:%u uptime_ms:%llu "
+             "conn_reject:%d cqm_low:%d cqm_high:%d "
+             "cmd_alloc:%d cmd_high:%d cmd_atomic:%d cmd_down:%d "
+             "cmd_tx:%d cmd_timeout:%d cmd_early_cfm:%d cmd_big_cfm:%d\n",
+             stats->device_generation, (unsigned long long)uptime_ms,
+             atomic_read(&stats->conn_firmware_rejects),
+             atomic_read(&stats->cqm_rssi_low_events),
+             atomic_read(&stats->cqm_rssi_high_events),
+             atomic_read(&stats->cmd_alloc_failures),
+             atomic_read(&stats->cmd_pool_high_water),
+             atomic_read(&stats->cmd_atomic_rejects),
+             atomic_read(&stats->cmd_bus_down_rejects),
+             atomic_read(&stats->cmd_tx_failures),
+             atomic_read(&stats->cmd_timeouts),
+             atomic_read(&stats->cmd_cfm_before_push),
+             atomic_read(&stats->cmd_cfm_oversize));
+    AICWFDBG(LOGINFO,
+             "runtime_instance_end generation:%u "
+             "rx_submit:%d rx_refill:%d rx_state:%d rx_queue:%d "
+             "rx_complete:%d rx_terminal:%d rx_short:%d rx_invalid:%d\n",
+             stats->device_generation,
+             atomic_read(&stats->usb_rx_submit_failures),
+             atomic_read(&stats->usb_rx_refill_failures),
+             atomic_read(&stats->usb_rx_state_rejects),
+             atomic_read(&stats->usb_rx_queue_overflows),
+             atomic_read(&stats->usb_rx_completion_errors),
+             atomic_read(&stats->usb_rx_terminal_errors),
+             atomic_read(&stats->usb_rx_short_frames),
+             atomic_read(&stats->usb_rx_invalid_lengths));
+    AICWFDBG(LOGINFO,
+             "runtime_instance_end generation:%u "
+             "msg_rx_submit:%d msg_rx_refill:%d msg_rx_state:%d "
+             "msg_rx_queue:%d msg_rx_complete:%d msg_rx_terminal:%d "
+             "msg_rx_invalid:%d msg_tx_submit:%d msg_tx_complete:%d "
+             "msg_tx_state:%d\n",
+             stats->device_generation,
+             atomic_read(&stats->usb_msg_rx_submit_failures),
+             atomic_read(&stats->usb_msg_rx_refill_failures),
+             atomic_read(&stats->usb_msg_rx_state_rejects),
+             atomic_read(&stats->usb_msg_rx_queue_overflows),
+             atomic_read(&stats->usb_msg_rx_completion_errors),
+             atomic_read(&stats->usb_msg_rx_terminal_errors),
+             atomic_read(&stats->usb_msg_rx_invalid_lengths),
+             atomic_read(&stats->usb_msg_tx_submit_failures),
+             atomic_read(&stats->usb_msg_tx_completion_errors),
+             atomic_read(&stats->usb_msg_tx_state_rejects));
+    AICWFDBG(LOGINFO,
+             "runtime_instance_end generation:%u "
+             "tx_submit:%d tx_complete:%d tx_nobuf:%d tx_state:%d "
+             "flow_stop:%d flow_wake:%d fw_invalid:%d fw_log_drop:%d "
+             "amsdu_invalid:%d radiotap_invalid:%d\n",
+             stats->device_generation,
+             atomic_read(&stats->usb_tx_submit_failures),
+             atomic_read(&stats->usb_tx_completion_errors),
+             atomic_read(&stats->usb_tx_no_buffers),
+             atomic_read(&stats->usb_tx_state_rejects),
+             atomic_read(&stats->usb_flow_stops),
+             atomic_read(&stats->usb_flow_wakes),
+             atomic_read(&stats->fw_msg_invalid),
+             atomic_read(&stats->fw_log_drops),
+             atomic_read(&stats->amsdu_invalid),
+             atomic_read(&stats->radiotap_invalid_rates));
 }
 
 static void aicwf_usb_disconnect(struct usb_interface *intf)
@@ -2298,6 +2387,7 @@ static void aicwf_usb_disconnect(struct usb_interface *intf)
 	}
 
     usb_set_intfdata(intf, NULL);
+    aicwf_usb_log_runtime_end(usb_dev);
 
 #if 0
 	if(timer_pending(&usb_dev->rwnx_hw->p2p_alive_timer) && usb_dev->rwnx_hw->is_p2p_alive == 1){
@@ -2307,7 +2397,6 @@ static void aicwf_usb_disconnect(struct usb_interface *intf)
 #endif
     aicwf_bus_deinit(usb_dev->dev);
     aicwf_usb_deinit(usb_dev);
-    rwnx_cmd_mgr_deinit(&usb_dev->cmd_mgr);
 
 #ifdef CONFIG_GPIO_WAKEUP
 	rwnx_unregister_hostwake_irq(usb_dev->dev);
@@ -2315,7 +2404,12 @@ static void aicwf_usb_disconnect(struct usb_interface *intf)
 
     if (usb_dev->rx_priv)
         aicwf_rx_deinit(usb_dev->rx_priv);
+#ifdef CONFIG_USB_TX_AGGR
+    if (usb_dev->tx_priv)
+        aicwf_tx_deinit(usb_dev->tx_priv);
+#endif
 
+    dev_set_drvdata(usb_dev->dev, NULL);
     kfree(usb_dev->bus_if);
     kfree(usb_dev);
 	AICWFDBG(LOGINFO, "%s exit\r\n", __func__);

@@ -30,6 +30,66 @@
  */
 extern int aicwf_sdio_writeb(struct aic_sdio_dev *sdiodev, uint regaddr, u8 val);
 
+static void cmd_complete(struct rwnx_cmd_mgr *cmd_mgr, struct rwnx_cmd *cmd);
+
+static struct rwnx_hw *cmd_mgr_rwnx_hw(struct rwnx_cmd_mgr *cmd_mgr)
+{
+#ifdef AICWF_SDIO_SUPPORT
+    struct aic_sdio_dev *sdiodev =
+        container_of(cmd_mgr, struct aic_sdio_dev, cmd_mgr);
+
+    return sdiodev->rwnx_hw;
+#elif defined(AICWF_USB_SUPPORT)
+    struct aic_usb_dev *usbdev =
+        container_of(cmd_mgr, struct aic_usb_dev, cmd_mgr);
+
+    return usbdev->rwnx_hw;
+#else
+    return NULL;
+#endif
+}
+
+static int cmd_mgr_tx(struct rwnx_cmd_mgr *cmd_mgr, struct lmac_msg *msg)
+{
+#ifdef AICWF_SDIO_SUPPORT
+    struct aic_sdio_dev *sdiodev =
+        container_of(cmd_mgr, struct aic_sdio_dev, cmd_mgr);
+
+    return aicwf_set_cmd_tx(sdiodev, msg,
+                            sizeof(*msg) + msg->param_len);
+#elif defined(AICWF_USB_SUPPORT)
+    struct aic_usb_dev *usbdev =
+        container_of(cmd_mgr, struct aic_usb_dev, cmd_mgr);
+
+    return aicwf_set_cmd_tx(usbdev, msg,
+                            sizeof(*msg) + msg->param_len);
+#else
+    return -ENODEV;
+#endif
+}
+
+static void cmd_mgr_record_tx_failure(struct rwnx_cmd_mgr *cmd_mgr)
+{
+    struct rwnx_hw *rwnx_hw = cmd_mgr_rwnx_hw(cmd_mgr);
+
+    if (rwnx_hw)
+        atomic_inc(&rwnx_hw->runtime_stats.cmd_tx_failures);
+}
+
+static void cmd_mgr_finish_cmd(struct rwnx_cmd_mgr *cmd_mgr,
+                               struct rwnx_cmd *cmd, int result)
+{
+    spin_lock_bh(&cmd_mgr->lock);
+    if (!(cmd->flags & RWNX_CMD_FLAG_DONE)) {
+        cmd->result = result;
+        cmd->flags &= ~(RWNX_CMD_FLAG_WAIT_PUSH |
+                        RWNX_CMD_FLAG_WAIT_ACK |
+                        RWNX_CMD_FLAG_WAIT_CFM);
+        cmd_complete(cmd_mgr, cmd);
+    }
+    spin_unlock_bh(&cmd_mgr->lock);
+}
+
 static void cmd_dump(const struct rwnx_cmd *cmd)
 {
     printk(KERN_CRIT "tkn[%d]  flags:%04x  result:%3d  cmd:%4d-%-24s - reqcfm(%4d-%-s)\n",
@@ -45,22 +105,25 @@ static void cmd_complete(struct rwnx_cmd_mgr *cmd_mgr, struct rwnx_cmd *cmd)
     //RWNX_DBG(RWNX_FN_ENTRY_STR);
     lockdep_assert_held(&cmd_mgr->lock);
 
-    list_del(&cmd->list);
-    cmd_mgr->queue_sz--;
+    list_del_init(&cmd->list);
+    if (WARN_ON_ONCE(!cmd_mgr->queue_sz))
+        cmd_mgr->queue_sz = 0;
+    else
+        cmd_mgr->queue_sz--;
 
     cmd->flags |= RWNX_CMD_FLAG_DONE;
-    if (cmd->flags & RWNX_CMD_FLAG_NONBLOCK) {
-        rwnx_cmd_free(cmd);//kfree(cmd);AIDEN
-    } else {
-        if (RWNX_CMD_WAIT_COMPLETE(cmd->flags)) {
+    if (RWNX_CMD_WAIT_COMPLETE(cmd->flags)) {
+        if (cmd->result == -EINTR)
             cmd->result = 0;
-            complete(&cmd->complete);
-        }
+        complete(&cmd->complete);
     }
 }
 
 int cmd_mgr_queue_force_defer(struct rwnx_cmd_mgr *cmd_mgr, struct rwnx_cmd *cmd)
 {
+    if (!cmd || !cmd->a2e_msg)
+        return -EINVAL;
+
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 #ifdef CREATE_TRACE_POINTS
     trace_msg_send(cmd->id);
@@ -76,7 +139,7 @@ int cmd_mgr_queue_force_defer(struct rwnx_cmd_mgr *cmd_mgr, struct rwnx_cmd *cmd
 
     #ifndef CONFIG_RWNX_FHOST
     if (!list_empty(&cmd_mgr->cmds)) {
-        if (cmd_mgr->queue_sz == cmd_mgr->max_queue_sz) {
+        if (cmd_mgr->queue_sz >= cmd_mgr->max_queue_sz) {
             printk(KERN_CRIT"Too many cmds (%d) already queued\n",
                    cmd_mgr->max_queue_sz);
             cmd->result = -ENOMEM;
@@ -86,15 +149,15 @@ int cmd_mgr_queue_force_defer(struct rwnx_cmd_mgr *cmd_mgr, struct rwnx_cmd *cmd
     }
     #endif
 
-    cmd->flags |= RWNX_CMD_FLAG_WAIT_PUSH;
+    cmd->flags |= RWNX_CMD_FLAG_WAIT_PUSH | RWNX_CMD_FLAG_WORKER_OWNS;
     if (cmd->flags & RWNX_CMD_FLAG_REQ_CFM)
         cmd->flags |= RWNX_CMD_FLAG_WAIT_CFM;
 
     cmd->tkn    = cmd_mgr->next_tkn++;
     cmd->result = -EINTR;
 
-    if (!(cmd->flags & RWNX_CMD_FLAG_NONBLOCK))
-        init_completion(&cmd->complete);
+    init_completion(&cmd->complete);
+    init_completion(&cmd->push_complete);
 
     list_add_tail(&cmd->list, &cmd_mgr->cmds);
     cmd_mgr->queue_sz++;
@@ -109,15 +172,17 @@ void rwnx_msg_free_(struct lmac_msg *msg);
 
 static int cmd_mgr_queue(struct rwnx_cmd_mgr *cmd_mgr, struct rwnx_cmd *cmd)
 {
-	int ret = 0;
+    int ret = 0;
+    long wait_ret;
 #ifdef AICWF_SDIO_SUPPORT
     struct aic_sdio_dev *sdiodev = container_of(cmd_mgr, struct aic_sdio_dev, cmd_mgr);
 #endif
-#ifdef AICWF_USB_SUPPORT
-	
-    struct aic_usb_dev *usbdev = container_of(cmd_mgr, struct aic_usb_dev, cmd_mgr);
-#endif
     bool defer_push = false;
+    bool expects_response;
+
+    if (!cmd || !cmd->a2e_msg)
+        return -EINVAL;
+    expects_response = cmd->flags & RWNX_CMD_FLAG_REQ_CFM;
 
     //RWNX_DBG(RWNX_FN_ENTRY_STR);
 #ifdef CREATE_TRACE_POINTS
@@ -136,7 +201,7 @@ static int cmd_mgr_queue(struct rwnx_cmd_mgr *cmd_mgr, struct rwnx_cmd *cmd)
     if (!list_empty(&cmd_mgr->cmds)) {
         struct rwnx_cmd *last;
 
-        if (cmd_mgr->queue_sz == cmd_mgr->max_queue_sz) {
+        if (cmd_mgr->queue_sz >= cmd_mgr->max_queue_sz) {
             printk(KERN_CRIT"Too many cmds (%d) already queued\n",
                    cmd_mgr->max_queue_sz);
             cmd->result = -ENOMEM;
@@ -168,8 +233,8 @@ static int cmd_mgr_queue(struct rwnx_cmd_mgr *cmd_mgr, struct rwnx_cmd *cmd)
     cmd->tkn    = cmd_mgr->next_tkn++;
     cmd->result = -EINTR;
 
-    if (!(cmd->flags & RWNX_CMD_FLAG_NONBLOCK))
-        init_completion(&cmd->complete);
+    init_completion(&cmd->complete);
+    init_completion(&cmd->push_complete);
 
     list_add_tail(&cmd->list, &cmd_mgr->cmds);
     cmd_mgr->queue_sz++;
@@ -186,61 +251,57 @@ static int cmd_mgr_queue(struct rwnx_cmd_mgr *cmd_mgr, struct rwnx_cmd *cmd)
 
     spin_unlock_bh(&cmd_mgr->lock);
     if (!defer_push) {
-		AICWFDBG(LOGTRACE, "queue:id=%x, param_len=%u\n",cmd->a2e_msg->id, cmd->a2e_msg->param_len);
-
-        #ifdef AICWF_SDIO_SUPPORT
-        aicwf_set_cmd_tx((void *)(sdiodev), cmd->a2e_msg, sizeof(struct lmac_msg) + cmd->a2e_msg->param_len);
-        #else
-        aicwf_set_cmd_tx((void *)(usbdev), cmd->a2e_msg, sizeof(struct lmac_msg) + cmd->a2e_msg->param_len);
-        #endif
-        //rwnx_ipc_msg_push(rwnx_hw, cmd, RWNX_CMD_A2EMSG_LEN(cmd->a2e_msg));
-
-		kfree(cmd->a2e_msg);
+        AICWFDBG(LOGTRACE, "queue:id=%x, param_len=%u\n",
+                 cmd->a2e_msg->id, cmd->a2e_msg->param_len);
+        ret = cmd_mgr_tx(cmd_mgr, cmd->a2e_msg);
+        kfree(cmd->a2e_msg);
+        cmd->a2e_msg = NULL;
+        if (ret) {
+            cmd_mgr_record_tx_failure(cmd_mgr);
+            cmd_mgr_finish_cmd(cmd_mgr, cmd, ret);
+        } else if (!expects_response)
+            cmd_mgr_finish_cmd(cmd_mgr, cmd, 0);
     } else {
-		WAKE_CMD_WORK(cmd_mgr);
-		return 0;
-	}
+        WAKE_CMD_WORK(cmd_mgr);
+    }
 
-    if (!(cmd->flags & RWNX_CMD_FLAG_NONBLOCK)) {
-        #ifdef CONFIG_RWNX_FHOST
-        if (wait_for_completion_killable(&cmd->complete)) {
-            cmd->result = -EINTR;
-            spin_lock_bh(&cmd_mgr->lock);
-            cmd_complete(cmd_mgr, cmd);
-            spin_unlock_bh(&cmd_mgr->lock);
-            /* TODO: kill the cmd at fw level */
-        }
-        #else
+#ifdef CONFIG_RWNX_FHOST
+    wait_ret = wait_for_completion_killable(&cmd->complete);
+    if (wait_ret) {
+        cmd_mgr_finish_cmd(cmd_mgr, cmd, (int)wait_ret);
+        /* TODO: kill the cmd at fw level */
+    }
+    ret = cmd->result;
+#else
         unsigned long tout = msecs_to_jiffies(RWNX_80211_CMD_TIMEOUT_MS/*AIDEN workaround* cmd_mgr->queue_sz*/);
-        if (!wait_for_completion_killable_timeout(&cmd->complete, tout)) {
+    wait_ret = wait_for_completion_killable_timeout(&cmd->complete, tout);
+    if (wait_ret <= 0) {
+        ret = wait_ret ? (int)wait_ret : -ETIMEDOUT;
+        if (!wait_ret) {
+            struct rwnx_hw *rwnx_hw = cmd_mgr_rwnx_hw(cmd_mgr);
+
+            if (rwnx_hw)
+                atomic_inc(&rwnx_hw->runtime_stats.cmd_timeouts);
             printk(KERN_CRIT"%s cmd timed-out cmd_mgr->queue_sz:%d\n", __func__,cmd_mgr->queue_sz);
-        #ifdef AICWF_SDIO_SUPPORT
-            ret = aicwf_sdio_writeb(sdiodev, SDIOWIFI_WAKEUP_REG, 2);
-            if (ret < 0) {
+#ifdef AICWF_SDIO_SUPPORT
+            if (aicwf_sdio_writeb(sdiodev, SDIOWIFI_WAKEUP_REG, 2) < 0) {
                 sdio_err("reg:%d write failed!\n", SDIOWIFI_WAKEUP_REG);
             }
-        #endif
+#endif
 
             cmd_dump(cmd);
             spin_lock_bh(&cmd_mgr->lock);
-            //AIDEN workaround 
             cmd_mgr->state = RWNX_CMD_MGR_STATE_CRASHED;
-            if (!(cmd->flags & RWNX_CMD_FLAG_DONE)) {
-                cmd->result = -ETIMEDOUT;
-                cmd_complete(cmd_mgr, cmd);
-            }
-			ret = -ETIMEDOUT;
             spin_unlock_bh(&cmd_mgr->lock);
         }
-		else{
-			rwnx_cmd_free(cmd);//kfree(cmd);AIDEN
-            if(!list_empty(&cmd_mgr->cmds) && usbdev->state == USB_UP_ST)
-                WAKE_CMD_WORK(cmd_mgr);
-		}
-        #endif
+        cmd_mgr_finish_cmd(cmd_mgr, cmd, ret);
     } else {
-        cmd->result = 0;
+        ret = cmd->result;
     }
+#endif
+    if (defer_push)
+        wait_for_completion(&cmd->push_complete);
+    WAKE_CMD_WORK(cmd_mgr);
     return ret;
 }
 
@@ -294,60 +355,83 @@ static void cmd_mgr_task_process(struct work_struct *work)
 {
     struct rwnx_cmd_mgr *cmd_mgr = container_of(work, struct rwnx_cmd_mgr, cmdWork);
     struct rwnx_cmd *cur, *next = NULL;
+    struct rwnx_hw *rwnx_hw = cmd_mgr_rwnx_hw(cmd_mgr);
     unsigned long tout;
+    long wait_ret;
+    int ret;
+    bool worker_owns = false;
+    bool expects_response = false;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
-    while(1) {
+    while (1) {
         next = NULL;
         spin_lock_bh(&cmd_mgr->lock);
 
+        if (cmd_mgr->state == RWNX_CMD_MGR_STATE_CRASHED) {
+            spin_unlock_bh(&cmd_mgr->lock);
+            break;
+        }
+
         list_for_each_entry(cur, &cmd_mgr->cmds, list) {
             if (cur->flags & RWNX_CMD_FLAG_WAIT_PUSH) { //just judge the first
-                    next = cur;
+                next = cur;
+                worker_owns = next->flags & RWNX_CMD_FLAG_WORKER_OWNS;
+                expects_response = next->flags & RWNX_CMD_FLAG_REQ_CFM;
+                next->flags &= ~RWNX_CMD_FLAG_WAIT_PUSH;
+                cmd_mgr->active_cmd = next;
             }
             break;
         }
         spin_unlock_bh(&cmd_mgr->lock);
 
-        if(next == NULL)
+        if (!next)
             break;
 
-        if (next) {
- 	    #ifdef AICWF_SDIO_SUPPORT
-            struct aic_sdio_dev *sdiodev = container_of(cmd_mgr, struct aic_sdio_dev, cmd_mgr);
-	    #endif
-	    #ifdef AICWF_USB_SUPPORT
-    	    struct aic_usb_dev *usbdev = container_of(cmd_mgr, struct aic_usb_dev, cmd_mgr);
-	    #endif
-            next->flags &= ~RWNX_CMD_FLAG_WAIT_PUSH;
+        ret = cmd_mgr_tx(cmd_mgr, next->a2e_msg);
+        kfree(next->a2e_msg);
+        next->a2e_msg = NULL;
+        if (ret) {
+            cmd_mgr_record_tx_failure(cmd_mgr);
+            cmd_mgr_finish_cmd(cmd_mgr, next, ret);
+        } else if (!expects_response)
+            cmd_mgr_finish_cmd(cmd_mgr, next, 0);
 
-            //printk("cmd_process, cmd->id=%d, tkn=%d\r\n",next->reqid, next->tkn);
-            //rwnx_ipc_msg_push(rwnx_hw, next, RWNX_CMD_A2EMSG_LEN(next->a2e_msg));
-#ifdef AICWF_SDIO_SUPPORT
-            aicwf_set_cmd_tx((void *)(sdiodev), next->a2e_msg, sizeof(struct lmac_msg) + next->a2e_msg->param_len);
-#else
-            aicwf_set_cmd_tx((void *)(usbdev), next->a2e_msg, sizeof(struct lmac_msg) + next->a2e_msg->param_len);
-#endif
-            kfree(next->a2e_msg);
+        /* Do not touch a caller-owned command after releasing its push wait. */
+        complete_all(&next->push_complete);
+        if (!worker_owns) {
+            spin_lock_bh(&cmd_mgr->lock);
+            if (cmd_mgr->active_cmd == next)
+                cmd_mgr->active_cmd = NULL;
+            spin_unlock_bh(&cmd_mgr->lock);
+            break;
+        }
 
-            tout = msecs_to_jiffies(RWNX_80211_CMD_TIMEOUT_MS * cmd_mgr->queue_sz);
-            if (!wait_for_completion_killable_timeout(&next->complete, tout)) {
-                printk(KERN_CRIT"%s cmd timed-out cmd_mgr->queue_sz:%d\n", __func__, cmd_mgr->queue_sz);
+        tout = msecs_to_jiffies(RWNX_80211_CMD_TIMEOUT_MS *
+                                 max_t(u32, cmd_mgr->queue_sz, 1));
+        wait_ret = wait_for_completion_killable_timeout(&next->complete,
+                                                         tout);
+        if (wait_ret <= 0) {
+            ret = wait_ret ? (int)wait_ret : -ETIMEDOUT;
+            if (!wait_ret) {
+                if (rwnx_hw)
+                    atomic_inc(&rwnx_hw->runtime_stats.cmd_timeouts);
+                printk(KERN_CRIT
+                       "%s cmd timed-out cmd_mgr->queue_sz:%d\n",
+                       __func__, cmd_mgr->queue_sz);
                 cmd_dump(next);
                 spin_lock_bh(&cmd_mgr->lock);
-                //AIDEN  workaround  
                 cmd_mgr->state = RWNX_CMD_MGR_STATE_CRASHED;
-                if (!(next->flags & RWNX_CMD_FLAG_DONE)) {
-                    next->result = -ETIMEDOUT;
-                    cmd_complete(cmd_mgr, next);
-                }
                 spin_unlock_bh(&cmd_mgr->lock);
-            } else
-		rwnx_cmd_free(next);//kfree(next);AIDEN
+            }
+            cmd_mgr_finish_cmd(cmd_mgr, next, ret);
         }
+        spin_lock_bh(&cmd_mgr->lock);
+        if (cmd_mgr->active_cmd == next)
+            cmd_mgr->active_cmd = NULL;
+        spin_unlock_bh(&cmd_mgr->lock);
+        rwnx_cmd_free(next);
     }
-
 }
 
 
@@ -388,6 +472,7 @@ static int cmd_mgr_msgind(struct rwnx_cmd_mgr *cmd_mgr, struct rwnx_cmd_e2amsg *
 #endif
     struct rwnx_cmd *cmd, *pos;
     bool found = false;
+    size_t param_len = msg->param_len;
 
    // RWNX_DBG(RWNX_FN_ENTRY_STR);
 #ifdef CREATE_TRACE_POINTS
@@ -399,18 +484,42 @@ static int cmd_mgr_msgind(struct rwnx_cmd_mgr *cmd_mgr, struct rwnx_cmd_e2amsg *
         if (cmd->reqid == msg->id &&
             (cmd->flags & RWNX_CMD_FLAG_WAIT_CFM)) {
 
+            if (cmd->flags & RWNX_CMD_FLAG_WAIT_PUSH) {
+                found = true;
+                if (rwnx_hw)
+                    atomic_inc(&rwnx_hw->runtime_stats.cmd_cfm_before_push);
+                AICWFDBG_RATELIMITED(
+                    LOGERROR,
+                    "drop CFM 0x%x for command still waiting to be sent\n",
+                    msg->id);
+                break;
+            }
+
+            if (param_len > RWNX_CMD_E2AMSG_LEN_MAX ||
+                (cmd->e2a_msg && param_len > cmd->e2a_msg_len)) {
+                size_t limit = cmd->e2a_msg ? cmd->e2a_msg_len :
+                               RWNX_CMD_E2AMSG_LEN_MAX;
+
+                found = true;
+                cmd->flags &= ~RWNX_CMD_FLAG_WAIT_CFM;
+                cmd->result = -EMSGSIZE;
+                if (rwnx_hw)
+                    atomic_inc(&rwnx_hw->runtime_stats.cmd_cfm_oversize);
+                AICWFDBG_RATELIMITED(
+                    LOGERROR,
+                    "CFM 0x%x payload too large: %zu > %zu\n",
+                    msg->id, param_len, limit);
+                if (RWNX_CMD_WAIT_COMPLETE(cmd->flags))
+                    cmd_complete(cmd_mgr, cmd);
+                break;
+            }
+
             if (!cmd_mgr_run_callback(rwnx_hw, cmd, msg, cb)) {
                 found = true;
                 cmd->flags &= ~RWNX_CMD_FLAG_WAIT_CFM;
 
-                if (WARN((msg->param_len > RWNX_CMD_E2AMSG_LEN_MAX),
-                         "Unexpect E2A msg len %d > %d\n", msg->param_len,
-                         RWNX_CMD_E2AMSG_LEN_MAX)) {
-                    msg->param_len = RWNX_CMD_E2AMSG_LEN_MAX;
-                }
-
-                if (cmd->e2a_msg && msg->param_len)
-                    memcpy(cmd->e2a_msg, &msg->param, msg->param_len);
+                if (cmd->e2a_msg && param_len)
+                    memcpy(cmd->e2a_msg, &msg->param, param_len);
 
                 if (RWNX_CMD_WAIT_COMPLETE(cmd->flags))
                     cmd_complete(cmd_mgr, cmd);
@@ -452,9 +561,21 @@ static void cmd_mgr_drain(struct rwnx_cmd_mgr *cmd_mgr)
 
     spin_lock_bh(&cmd_mgr->lock);
     list_for_each_entry_safe(cur, nxt, &cmd_mgr->cmds, list) {
-        list_del(&cur->list);
+        bool worker_owns = cur->flags & RWNX_CMD_FLAG_WORKER_OWNS;
+
+        list_del_init(&cur->list);
         cmd_mgr->queue_sz--;
-        if (!(cur->flags & RWNX_CMD_FLAG_NONBLOCK))
+        cur->result = -ESHUTDOWN;
+        cur->flags &= ~(RWNX_CMD_FLAG_WAIT_PUSH |
+                        RWNX_CMD_FLAG_WAIT_ACK |
+                        RWNX_CMD_FLAG_WAIT_CFM);
+        cur->flags |= RWNX_CMD_FLAG_DONE;
+        kfree(cur->a2e_msg);
+        cur->a2e_msg = NULL;
+        complete_all(&cur->push_complete);
+        if (worker_owns)
+            rwnx_cmd_free(cur);
+        else
             complete(&cur->complete);
     }
     spin_unlock_bh(&cmd_mgr->lock);
@@ -465,8 +586,9 @@ void rwnx_cmd_mgr_init(struct rwnx_cmd_mgr *cmd_mgr)
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
     INIT_LIST_HEAD(&cmd_mgr->cmds);
-	cmd_mgr->state = RWNX_CMD_MGR_STATE_INITED;
+	cmd_mgr->state = RWNX_CMD_MGR_STATE_CRASHED;
     spin_lock_init(&cmd_mgr->lock);
+    cmd_mgr->active_cmd = NULL;
     cmd_mgr->max_queue_sz = RWNX_CMD_MAX_QUEUED;
     cmd_mgr->queue  = &cmd_mgr_queue;
     cmd_mgr->print  = &cmd_mgr_print;
@@ -480,23 +602,47 @@ void rwnx_cmd_mgr_init(struct rwnx_cmd_mgr *cmd_mgr)
         txrx_err("insufficient memory to create cmd workqueue.\n");
         return;
     }
+    cmd_mgr->state = RWNX_CMD_MGR_STATE_INITED;
 }
 
 void rwnx_cmd_mgr_deinit(struct rwnx_cmd_mgr *cmd_mgr)
 {
+    struct rwnx_cmd *active_cmd;
+
+    spin_lock_bh(&cmd_mgr->lock);
+    cmd_mgr->state = RWNX_CMD_MGR_STATE_CRASHED;
+    active_cmd = cmd_mgr->active_cmd;
+    if (active_cmd &&
+        (active_cmd->flags & RWNX_CMD_FLAG_WORKER_OWNS) &&
+        !(active_cmd->flags & RWNX_CMD_FLAG_DONE)) {
+        active_cmd->result = -ESHUTDOWN;
+        active_cmd->flags &= ~(RWNX_CMD_FLAG_WAIT_PUSH |
+                               RWNX_CMD_FLAG_WAIT_ACK |
+                               RWNX_CMD_FLAG_WAIT_CFM);
+        cmd_complete(cmd_mgr, active_cmd);
+    }
+    spin_unlock_bh(&cmd_mgr->lock);
     cmd_mgr->print(cmd_mgr);
+    if (cmd_mgr->cmd_wq)
+        cancel_work_sync(&cmd_mgr->cmdWork);
     cmd_mgr->drain(cmd_mgr);
     cmd_mgr->print(cmd_mgr);
-    flush_workqueue(cmd_mgr->cmd_wq);
-    destroy_workqueue(cmd_mgr->cmd_wq);
+    if (cmd_mgr->cmd_wq)
+        destroy_workqueue(cmd_mgr->cmd_wq);
     memset(cmd_mgr, 0, sizeof(*cmd_mgr));
 }
 
 
-void aicwf_set_cmd_tx(void *dev, struct lmac_msg *msg, uint len)
+int aicwf_set_cmd_tx(void *dev, struct lmac_msg *msg, uint len)
 {
     u8 *buffer = NULL;
     u16 index = 0;
+    int ret;
+
+    if (!dev || !msg)
+        return -EINVAL;
+    if (len != sizeof(*msg) + msg->param_len || len > CMD_BUF_MAX - 8)
+        return -EMSGSIZE;
 #ifdef AICWF_SDIO_SUPPORT
 	struct aic_sdio_dev *sdiodev = (struct aic_sdio_dev *)dev;
     struct aicwf_bus *bus = sdiodev->bus_if;
@@ -504,11 +650,15 @@ void aicwf_set_cmd_tx(void *dev, struct lmac_msg *msg, uint len)
 	struct aic_usb_dev *usbdev = (struct aic_usb_dev *)dev;
 	struct aicwf_bus *bus = NULL;
     if (!usbdev->state) {
-        printk("down msg \n");
-        return;
+        AICWFDBG_RATELIMITED(LOGERROR, "command rejected: USB is down\n");
+        return -ESHUTDOWN;
     }
 	bus = usbdev->bus_if;
 #endif
+    if (!bus || !bus->cmd_buf)
+        return -ENODEV;
+
+    mutex_lock(&bus->cmd_buf_lock);
     buffer = bus->cmd_buf;
 
     memset(buffer, 0, CMD_BUF_MAX);
@@ -531,5 +681,8 @@ void aicwf_set_cmd_tx(void *dev, struct lmac_msg *msg, uint len)
     index += 2;
     memcpy(&buffer[index], (u8 *)msg->param, msg->param_len);
 
-    aicwf_bus_txmsg(bus, buffer, len + 8);
+    ret = aicwf_bus_txmsg(bus, buffer, len + 8);
+    mutex_unlock(&bus->cmd_buf_lock);
+
+    return ret;
 }

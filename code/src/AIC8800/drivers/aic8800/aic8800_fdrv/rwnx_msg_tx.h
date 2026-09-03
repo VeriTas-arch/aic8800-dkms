@@ -15,7 +15,7 @@
 
 #include "rwnx_defs.h"
 
-struct rwnx_cmd *rwnx_cmd_malloc(void);
+struct rwnx_cmd *rwnx_cmd_malloc(struct rwnx_hw *rwnx_hw);
 void rwnx_cmd_free(struct rwnx_cmd *cmd);
 int rwnx_init_cmd_array(void);
 void rwnx_free_cmd_array(void);
