@@ -23,6 +23,7 @@
 #ifdef AICWF_ARP_OFFLOAD
 #include <linux/ip.h>
 #include <linux/udp.h>
+#include <net/ip.h>
 #include "rwnx_msg_tx.h"
 #endif
 
@@ -1281,37 +1282,88 @@ static int rwnx_rx_monitor(struct rwnx_hw *rwnx_hw, struct rwnx_vif *rwnx_vif,
 #ifdef AICWF_ARP_OFFLOAD
 void arpoffload_proc(struct sk_buff *skb, struct rwnx_vif *rwnx_vif)
 {
-    struct iphdr *iphead = (struct iphdr *)(skb->data);
+    struct iphdr *iphead;
     struct udphdr *udph;
     struct DHCPInfo *dhcph;
+    const u8 *options;
+    unsigned int ip_header_len;
+    unsigned int ip_len;
+    unsigned int udp_len;
+    unsigned int options_len;
+    unsigned int offset = 0;
+    bool message_type_seen = false;
+    bool is_ack = false;
+    u8 enable;
 
-    if(skb->protocol == htons(ETH_P_IP)) { // IP
-        if(iphead->protocol == IPPROTO_UDP) { // UDP
-            udph = (struct udphdr *)((u8 *)iphead + (iphead->ihl << 2));
-            if((udph->source == __constant_htons(SERVER_PORT))
-                && (udph->dest == __constant_htons(CLIENT_PORT))) { // DHCP offset/ack
-                dhcph =	(struct DHCPInfo *)((u8 *)udph + sizeof(struct udphdr));
-                if(dhcph->cookie == htonl(DHCP_MAGIC) && dhcph->op == 2 &&
-                    !memcmp(dhcph->chaddr, rwnx_vif->ndev->dev_addr, 6)) { // match magic word
-                    u32 length = ntohs(udph->len) - sizeof(struct udphdr) - offsetof(struct DHCPInfo, options);
-                    u16 offset = 0;
-                    u8 *option = dhcph->options;
-                    while (option[offset]!= DHCP_OPTION_END && offset<length) {
-                        if (option[offset] == DHCP_OPTION_MESSAGE_TYPE) {
-                            if (option[offset+2] == DHCP_ACK) {
-                                dhcped = 1;
-                                if(rwnx_vif->sta.group_cipher_type == WLAN_CIPHER_SUITE_CCMP)
-                                    rwnx_send_arpoffload_en_req(rwnx_vif->rwnx_hw, rwnx_vif, dhcph->yiaddr, 1);
-                                else
-                                    rwnx_send_arpoffload_en_req(rwnx_vif->rwnx_hw, rwnx_vif, dhcph->yiaddr, 0);
-                             }
-                        }
-                        offset += 2 + option[offset+1];
-                    }
-                }
-            }
+    if (skb->protocol != htons(ETH_P_IP) ||
+        !pskb_may_pull(skb, sizeof(*iphead)))
+        return;
+
+    iphead = (struct iphdr *)skb->data;
+    if (iphead->version != 4 || iphead->ihl < 5 ||
+        iphead->protocol != IPPROTO_UDP || ip_is_fragment(iphead))
+        return;
+
+    ip_header_len = iphead->ihl << 2;
+    ip_len = ntohs(iphead->tot_len);
+    if (ip_len < ip_header_len + sizeof(*udph) || ip_len > skb->len ||
+        !pskb_may_pull(skb, ip_header_len + sizeof(*udph)))
+        return;
+
+    iphead = (struct iphdr *)skb->data;
+    udph = (struct udphdr *)((u8 *)iphead + ip_header_len);
+    if (udph->source != htons(SERVER_PORT) ||
+        udph->dest != htons(CLIENT_PORT))
+        return;
+
+    udp_len = ntohs(udph->len);
+    if (udp_len < sizeof(*udph) + offsetof(struct DHCPInfo, options) ||
+        udp_len > ip_len - ip_header_len ||
+        !pskb_may_pull(skb, ip_header_len + udp_len))
+        return;
+
+    iphead = (struct iphdr *)skb->data;
+    udph = (struct udphdr *)((u8 *)iphead + ip_header_len);
+    dhcph = (struct DHCPInfo *)((u8 *)udph + sizeof(*udph));
+    if (dhcph->cookie != htonl(DHCP_MAGIC) || dhcph->op != 2 ||
+        memcmp(dhcph->chaddr, rwnx_vif->ndev->dev_addr, ETH_ALEN))
+        return;
+
+    options = (const u8 *)dhcph + offsetof(struct DHCPInfo, options);
+    options_len = udp_len - sizeof(*udph) -
+                  offsetof(struct DHCPInfo, options);
+
+    while (offset < options_len) {
+        u8 option_code = options[offset++];
+        u8 option_len;
+
+        if (option_code == DHCP_OPTION_END)
+            break;
+        if (option_code == DHCP_OPTION_PAD)
+            continue;
+        if (offset >= options_len)
+            return;
+
+        option_len = options[offset++];
+        if (option_len > options_len - offset)
+            return;
+
+        if (option_code == DHCP_OPTION_MESSAGE_TYPE) {
+            if (option_len != 1 || message_type_seen)
+                return;
+            message_type_seen = true;
+            is_ack = options[offset] == DHCP_ACK;
         }
+        offset += option_len;
     }
+
+    if (!is_ack)
+        return;
+
+    dhcped = 1;
+    enable = rwnx_vif->sta.group_cipher_type == WLAN_CIPHER_SUITE_CCMP;
+    rwnx_send_arpoffload_en_req(rwnx_vif->rwnx_hw, rwnx_vif,
+                                dhcph->yiaddr, enable);
 }
 #endif
 

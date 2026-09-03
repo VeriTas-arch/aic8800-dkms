@@ -1071,7 +1071,6 @@ int rwnx_send_arpoffload_en_req(struct rwnx_hw *rwnx_hw, struct rwnx_vif *rwnx_v
                           u32_l ipaddr,  u8_l enable)
 {
     struct mm_set_arpoffload_en_req *arp_offload_req;
-    int error;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
@@ -1088,10 +1087,11 @@ int rwnx_send_arpoffload_en_req(struct rwnx_hw *rwnx_hw, struct rwnx_vif *rwnx_v
 	arp_offload_req->vif_idx = rwnx_vif->vif_index;
 	arp_offload_req->ipaddr = ipaddr;
 
-    /* Send the MM_ARPOFFLOAD_EN_REQ message to UMAC FW */
-    error = rwnx_send_msg(rwnx_hw, arp_offload_req, 1, MM_SET_ARPOFFLOAD_CFM, NULL, 0);
-
-    return (error);
+    /* DHCP ACKs are inspected from the RX softirq path. Queue this confirmed
+     * request for the command worker instead of sleeping for its confirmation.
+     */
+    return rwnx_send_msg1(rwnx_hw, arp_offload_req, 1,
+                          MM_SET_ARPOFFLOAD_CFM, NULL, 0, true);
 }
 #endif
 

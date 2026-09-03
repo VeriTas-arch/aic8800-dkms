@@ -16,6 +16,7 @@
 #define CLIENT_PORT			68
 #define DHCP_MAGIC			0x63825363
 #define DHCP_ACK      		5
+#define DHCP_OPTION_PAD 0
 #define DHCP_OPTION_MESSAGE_TYPE 53 /* RFC 2132 9.6, important for DHCP */
 #define DHCP_OPTION_END 255
 
