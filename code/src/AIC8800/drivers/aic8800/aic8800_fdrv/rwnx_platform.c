@@ -48,12 +48,6 @@ struct rwnx_plat *g_rwnx_plat = NULL;
 #define FW_PATH_MAX_LEN 200
 extern char aic_fw_path[FW_PATH_MAX_LEN];
 
-//Parser state
-#define INIT 0
-#define CMD 1
-#define PRINT 2
-#define GET_VALUE 3
-
 typedef struct
 {
     txpwr_lvl_conf_t txpwr_lvl;
@@ -63,7 +57,7 @@ typedef struct
     xtal_cap_conf_t xtal_cap;
 } userconfig_info_t;
 
-userconfig_info_t userconfig_info = {
+static const userconfig_info_t userconfig_defaults = {
     .txpwr_lvl = {
         .enable           = 1,
         .dsss             = 9,
@@ -108,6 +102,8 @@ userconfig_info_t userconfig_info = {
         .xtal_cap_fine = 31,
     },
 };
+
+static userconfig_info_t userconfig_info;
 
 
 #ifndef CONFIG_ROM_PATCH_EN
@@ -1450,32 +1446,6 @@ static int rwnx_check_fw_compatibility(struct rwnx_hw *rwnx_hw)
 #endif
 #endif /* !CONFIG_RWNX_FHOST */
 
-static int rwnx_atoi(char *value)
-{
-    int len = 0;
-    int i = 0;
-    int result = 0;
-    int flag = 1;
-
-    if (value[0] == '-') {
-        flag = -1;
-        value++;
-    }
-    len = strlen(value);
-
-    for (i = 0;i < len ;i++) {
-        result = result * 10;
-        if (value[i] >= 48 && value[i] <= 57) {
-            result += value[i] - 48;
-        } else {
-            result = 0;
-            break;
-        }
-    }
-
-    return result * flag;
-}
-
 void get_userconfig_txpwr_lvl_in_fdrv(txpwr_lvl_conf_t *txpwr_lvl)
 {
     txpwr_lvl->enable           = userconfig_info.txpwr_lvl.enable;
@@ -1489,57 +1459,57 @@ void get_userconfig_txpwr_lvl_in_fdrv(txpwr_lvl_conf_t *txpwr_lvl)
     txpwr_lvl->ofdm256qam_5g    = userconfig_info.txpwr_lvl.ofdm256qam_5g;
     txpwr_lvl->ofdm1024qam_5g   = userconfig_info.txpwr_lvl.ofdm1024qam_5g;
 
-    AICWFDBG(LOGINFO, "%s:enable:%d\r\n",          __func__, txpwr_lvl->enable);
-    AICWFDBG(LOGINFO, "%s:dsss:%d\r\n",            __func__, txpwr_lvl->dsss);
-    AICWFDBG(LOGINFO, "%s:ofdmlowrate_2g4:%d\r\n", __func__, txpwr_lvl->ofdmlowrate_2g4);
-    AICWFDBG(LOGINFO, "%s:ofdm64qam_2g4:%d\r\n",   __func__, txpwr_lvl->ofdm64qam_2g4);
-    AICWFDBG(LOGINFO, "%s:ofdm256qam_2g4:%d\r\n",  __func__, txpwr_lvl->ofdm256qam_2g4);
-    AICWFDBG(LOGINFO, "%s:ofdm1024qam_2g4:%d\r\n", __func__, txpwr_lvl->ofdm1024qam_2g4);
-    AICWFDBG(LOGINFO, "%s:ofdmlowrate_5g:%d\r\n",  __func__, txpwr_lvl->ofdmlowrate_5g);
-    AICWFDBG(LOGINFO, "%s:ofdm64qam_5g:%d\r\n",    __func__, txpwr_lvl->ofdm64qam_5g);
-    AICWFDBG(LOGINFO, "%s:ofdm256qam_5g:%d\r\n",   __func__, txpwr_lvl->ofdm256qam_5g);
-    AICWFDBG(LOGINFO, "%s:ofdm1024qam_5g:%d\r\n",  __func__, txpwr_lvl->ofdm1024qam_5g);
+    AICWFDBG(LOGDEBUG, "%s:enable:%d\r\n",          __func__, txpwr_lvl->enable);
+    AICWFDBG(LOGDEBUG, "%s:dsss:%d\r\n",            __func__, txpwr_lvl->dsss);
+    AICWFDBG(LOGDEBUG, "%s:ofdmlowrate_2g4:%d\r\n", __func__, txpwr_lvl->ofdmlowrate_2g4);
+    AICWFDBG(LOGDEBUG, "%s:ofdm64qam_2g4:%d\r\n",   __func__, txpwr_lvl->ofdm64qam_2g4);
+    AICWFDBG(LOGDEBUG, "%s:ofdm256qam_2g4:%d\r\n",  __func__, txpwr_lvl->ofdm256qam_2g4);
+    AICWFDBG(LOGDEBUG, "%s:ofdm1024qam_2g4:%d\r\n", __func__, txpwr_lvl->ofdm1024qam_2g4);
+    AICWFDBG(LOGDEBUG, "%s:ofdmlowrate_5g:%d\r\n",  __func__, txpwr_lvl->ofdmlowrate_5g);
+    AICWFDBG(LOGDEBUG, "%s:ofdm64qam_5g:%d\r\n",    __func__, txpwr_lvl->ofdm64qam_5g);
+    AICWFDBG(LOGDEBUG, "%s:ofdm256qam_5g:%d\r\n",   __func__, txpwr_lvl->ofdm256qam_5g);
+    AICWFDBG(LOGDEBUG, "%s:ofdm1024qam_5g:%d\r\n",  __func__, txpwr_lvl->ofdm1024qam_5g);
 }
 
 void get_userconfig_txpwr_lvl_v2_in_fdrv(txpwr_lvl_conf_v2_t *txpwr_lvl_v2)
 {
     *txpwr_lvl_v2 = userconfig_info.txpwr_lvl_v2;
 
-    AICWFDBG(LOGINFO, "%s:enable:%d\r\n",               __func__, txpwr_lvl_v2->enable);
-    AICWFDBG(LOGINFO, "%s:lvl_11b_11ag_1m_2g4:%d\r\n",  __func__, txpwr_lvl_v2->pwrlvl_11b_11ag_2g4[0]);
-    AICWFDBG(LOGINFO, "%s:lvl_11b_11ag_2m_2g4:%d\r\n",  __func__, txpwr_lvl_v2->pwrlvl_11b_11ag_2g4[1]);
-    AICWFDBG(LOGINFO, "%s:lvl_11b_11ag_5m5_2g4:%d\r\n", __func__, txpwr_lvl_v2->pwrlvl_11b_11ag_2g4[2]);
-    AICWFDBG(LOGINFO, "%s:lvl_11b_11ag_11m_2g4:%d\r\n", __func__, txpwr_lvl_v2->pwrlvl_11b_11ag_2g4[3]);
-    AICWFDBG(LOGINFO, "%s:lvl_11b_11ag_6m_2g4:%d\r\n",  __func__, txpwr_lvl_v2->pwrlvl_11b_11ag_2g4[4]);
-    AICWFDBG(LOGINFO, "%s:lvl_11b_11ag_9m_2g4:%d\r\n",  __func__, txpwr_lvl_v2->pwrlvl_11b_11ag_2g4[5]);
-    AICWFDBG(LOGINFO, "%s:lvl_11b_11ag_12m_2g4:%d\r\n", __func__, txpwr_lvl_v2->pwrlvl_11b_11ag_2g4[6]);
-    AICWFDBG(LOGINFO, "%s:lvl_11b_11ag_18m_2g4:%d\r\n", __func__, txpwr_lvl_v2->pwrlvl_11b_11ag_2g4[7]);
-    AICWFDBG(LOGINFO, "%s:lvl_11b_11ag_24m_2g4:%d\r\n", __func__, txpwr_lvl_v2->pwrlvl_11b_11ag_2g4[8]);
-    AICWFDBG(LOGINFO, "%s:lvl_11b_11ag_36m_2g4:%d\r\n", __func__, txpwr_lvl_v2->pwrlvl_11b_11ag_2g4[9]);
-    AICWFDBG(LOGINFO, "%s:lvl_11b_11ag_48m_2g4:%d\r\n", __func__, txpwr_lvl_v2->pwrlvl_11b_11ag_2g4[10]);
-    AICWFDBG(LOGINFO, "%s:lvl_11b_11ag_54m_2g4:%d\r\n", __func__, txpwr_lvl_v2->pwrlvl_11b_11ag_2g4[11]);
-    AICWFDBG(LOGINFO, "%s:lvl_11n_11ac_mcs0_2g4:%d\r\n",__func__, txpwr_lvl_v2->pwrlvl_11n_11ac_2g4[0]);
-    AICWFDBG(LOGINFO, "%s:lvl_11n_11ac_mcs1_2g4:%d\r\n",__func__, txpwr_lvl_v2->pwrlvl_11n_11ac_2g4[1]);
-    AICWFDBG(LOGINFO, "%s:lvl_11n_11ac_mcs2_2g4:%d\r\n",__func__, txpwr_lvl_v2->pwrlvl_11n_11ac_2g4[2]);
-    AICWFDBG(LOGINFO, "%s:lvl_11n_11ac_mcs3_2g4:%d\r\n",__func__, txpwr_lvl_v2->pwrlvl_11n_11ac_2g4[3]);
-    AICWFDBG(LOGINFO, "%s:lvl_11n_11ac_mcs4_2g4:%d\r\n",__func__, txpwr_lvl_v2->pwrlvl_11n_11ac_2g4[4]);
-    AICWFDBG(LOGINFO, "%s:lvl_11n_11ac_mcs5_2g4:%d\r\n",__func__, txpwr_lvl_v2->pwrlvl_11n_11ac_2g4[5]);
-    AICWFDBG(LOGINFO, "%s:lvl_11n_11ac_mcs6_2g4:%d\r\n",__func__, txpwr_lvl_v2->pwrlvl_11n_11ac_2g4[6]);
-    AICWFDBG(LOGINFO, "%s:lvl_11n_11ac_mcs7_2g4:%d\r\n",__func__, txpwr_lvl_v2->pwrlvl_11n_11ac_2g4[7]);
-    AICWFDBG(LOGINFO, "%s:lvl_11n_11ac_mcs8_2g4:%d\r\n",__func__, txpwr_lvl_v2->pwrlvl_11n_11ac_2g4[8]);
-    AICWFDBG(LOGINFO, "%s:lvl_11n_11ac_mcs9_2g4:%d\r\n",__func__, txpwr_lvl_v2->pwrlvl_11n_11ac_2g4[9]);
-    AICWFDBG(LOGINFO, "%s:lvl_11ax_mcs0_2g4:%d\r\n",    __func__, txpwr_lvl_v2->pwrlvl_11ax_2g4[0]);
-    AICWFDBG(LOGINFO, "%s:lvl_11ax_mcs1_2g4:%d\r\n",    __func__, txpwr_lvl_v2->pwrlvl_11ax_2g4[1]);
-    AICWFDBG(LOGINFO, "%s:lvl_11ax_mcs2_2g4:%d\r\n",    __func__, txpwr_lvl_v2->pwrlvl_11ax_2g4[2]);
-    AICWFDBG(LOGINFO, "%s:lvl_11ax_mcs3_2g4:%d\r\n",    __func__, txpwr_lvl_v2->pwrlvl_11ax_2g4[3]);
-    AICWFDBG(LOGINFO, "%s:lvl_11ax_mcs4_2g4:%d\r\n",    __func__, txpwr_lvl_v2->pwrlvl_11ax_2g4[4]);
-    AICWFDBG(LOGINFO, "%s:lvl_11ax_mcs5_2g4:%d\r\n",    __func__, txpwr_lvl_v2->pwrlvl_11ax_2g4[5]);
-    AICWFDBG(LOGINFO, "%s:lvl_11ax_mcs6_2g4:%d\r\n",    __func__, txpwr_lvl_v2->pwrlvl_11ax_2g4[6]);
-    AICWFDBG(LOGINFO, "%s:lvl_11ax_mcs7_2g4:%d\r\n",    __func__, txpwr_lvl_v2->pwrlvl_11ax_2g4[7]);
-    AICWFDBG(LOGINFO, "%s:lvl_11ax_mcs8_2g4:%d\r\n",    __func__, txpwr_lvl_v2->pwrlvl_11ax_2g4[8]);
-    AICWFDBG(LOGINFO, "%s:lvl_11ax_mcs9_2g4:%d\r\n",    __func__, txpwr_lvl_v2->pwrlvl_11ax_2g4[9]);
-    AICWFDBG(LOGINFO, "%s:lvl_11ax_mcs10_2g4:%d\r\n",   __func__, txpwr_lvl_v2->pwrlvl_11ax_2g4[10]);
-    AICWFDBG(LOGINFO, "%s:lvl_11ax_mcs11_2g4:%d\r\n",   __func__, txpwr_lvl_v2->pwrlvl_11ax_2g4[11]);
+    AICWFDBG(LOGDEBUG, "%s:enable:%d\r\n",               __func__, txpwr_lvl_v2->enable);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11b_11ag_1m_2g4:%d\r\n",  __func__, txpwr_lvl_v2->pwrlvl_11b_11ag_2g4[0]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11b_11ag_2m_2g4:%d\r\n",  __func__, txpwr_lvl_v2->pwrlvl_11b_11ag_2g4[1]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11b_11ag_5m5_2g4:%d\r\n", __func__, txpwr_lvl_v2->pwrlvl_11b_11ag_2g4[2]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11b_11ag_11m_2g4:%d\r\n", __func__, txpwr_lvl_v2->pwrlvl_11b_11ag_2g4[3]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11b_11ag_6m_2g4:%d\r\n",  __func__, txpwr_lvl_v2->pwrlvl_11b_11ag_2g4[4]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11b_11ag_9m_2g4:%d\r\n",  __func__, txpwr_lvl_v2->pwrlvl_11b_11ag_2g4[5]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11b_11ag_12m_2g4:%d\r\n", __func__, txpwr_lvl_v2->pwrlvl_11b_11ag_2g4[6]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11b_11ag_18m_2g4:%d\r\n", __func__, txpwr_lvl_v2->pwrlvl_11b_11ag_2g4[7]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11b_11ag_24m_2g4:%d\r\n", __func__, txpwr_lvl_v2->pwrlvl_11b_11ag_2g4[8]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11b_11ag_36m_2g4:%d\r\n", __func__, txpwr_lvl_v2->pwrlvl_11b_11ag_2g4[9]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11b_11ag_48m_2g4:%d\r\n", __func__, txpwr_lvl_v2->pwrlvl_11b_11ag_2g4[10]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11b_11ag_54m_2g4:%d\r\n", __func__, txpwr_lvl_v2->pwrlvl_11b_11ag_2g4[11]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11n_11ac_mcs0_2g4:%d\r\n",__func__, txpwr_lvl_v2->pwrlvl_11n_11ac_2g4[0]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11n_11ac_mcs1_2g4:%d\r\n",__func__, txpwr_lvl_v2->pwrlvl_11n_11ac_2g4[1]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11n_11ac_mcs2_2g4:%d\r\n",__func__, txpwr_lvl_v2->pwrlvl_11n_11ac_2g4[2]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11n_11ac_mcs3_2g4:%d\r\n",__func__, txpwr_lvl_v2->pwrlvl_11n_11ac_2g4[3]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11n_11ac_mcs4_2g4:%d\r\n",__func__, txpwr_lvl_v2->pwrlvl_11n_11ac_2g4[4]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11n_11ac_mcs5_2g4:%d\r\n",__func__, txpwr_lvl_v2->pwrlvl_11n_11ac_2g4[5]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11n_11ac_mcs6_2g4:%d\r\n",__func__, txpwr_lvl_v2->pwrlvl_11n_11ac_2g4[6]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11n_11ac_mcs7_2g4:%d\r\n",__func__, txpwr_lvl_v2->pwrlvl_11n_11ac_2g4[7]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11n_11ac_mcs8_2g4:%d\r\n",__func__, txpwr_lvl_v2->pwrlvl_11n_11ac_2g4[8]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11n_11ac_mcs9_2g4:%d\r\n",__func__, txpwr_lvl_v2->pwrlvl_11n_11ac_2g4[9]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11ax_mcs0_2g4:%d\r\n",    __func__, txpwr_lvl_v2->pwrlvl_11ax_2g4[0]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11ax_mcs1_2g4:%d\r\n",    __func__, txpwr_lvl_v2->pwrlvl_11ax_2g4[1]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11ax_mcs2_2g4:%d\r\n",    __func__, txpwr_lvl_v2->pwrlvl_11ax_2g4[2]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11ax_mcs3_2g4:%d\r\n",    __func__, txpwr_lvl_v2->pwrlvl_11ax_2g4[3]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11ax_mcs4_2g4:%d\r\n",    __func__, txpwr_lvl_v2->pwrlvl_11ax_2g4[4]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11ax_mcs5_2g4:%d\r\n",    __func__, txpwr_lvl_v2->pwrlvl_11ax_2g4[5]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11ax_mcs6_2g4:%d\r\n",    __func__, txpwr_lvl_v2->pwrlvl_11ax_2g4[6]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11ax_mcs7_2g4:%d\r\n",    __func__, txpwr_lvl_v2->pwrlvl_11ax_2g4[7]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11ax_mcs8_2g4:%d\r\n",    __func__, txpwr_lvl_v2->pwrlvl_11ax_2g4[8]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11ax_mcs9_2g4:%d\r\n",    __func__, txpwr_lvl_v2->pwrlvl_11ax_2g4[9]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11ax_mcs10_2g4:%d\r\n",   __func__, txpwr_lvl_v2->pwrlvl_11ax_2g4[10]);
+    AICWFDBG(LOGDEBUG, "%s:lvl_11ax_mcs11_2g4:%d\r\n",   __func__, txpwr_lvl_v2->pwrlvl_11ax_2g4[11]);
 }
 
 void get_userconfig_txpwr_ofst_in_fdrv(txpwr_ofst_conf_t *txpwr_ofst)
@@ -1553,14 +1523,14 @@ void get_userconfig_txpwr_ofst_in_fdrv(txpwr_ofst_conf_t *txpwr_ofst)
     txpwr_ofst->chan_122_140 = userconfig_info.txpwr_ofst.chan_122_140;
     txpwr_ofst->chan_142_165 = userconfig_info.txpwr_ofst.chan_142_165;
 
-    AICWFDBG(LOGINFO, "%s:enable      :%d\r\n", __func__, txpwr_ofst->enable);
-    AICWFDBG(LOGINFO, "%s:chan_1_4    :%d\r\n", __func__, txpwr_ofst->chan_1_4);
-    AICWFDBG(LOGINFO, "%s:chan_5_9    :%d\r\n", __func__, txpwr_ofst->chan_5_9);
-    AICWFDBG(LOGINFO, "%s:chan_10_13  :%d\r\n", __func__, txpwr_ofst->chan_10_13);
-    AICWFDBG(LOGINFO, "%s:chan_36_64  :%d\r\n", __func__, txpwr_ofst->chan_36_64);
-    AICWFDBG(LOGINFO, "%s:chan_100_120:%d\r\n", __func__, txpwr_ofst->chan_100_120);
-    AICWFDBG(LOGINFO, "%s:chan_122_140:%d\r\n", __func__, txpwr_ofst->chan_122_140);
-    AICWFDBG(LOGINFO, "%s:chan_142_165:%d\r\n", __func__, txpwr_ofst->chan_142_165);
+    AICWFDBG(LOGDEBUG, "%s:enable      :%d\r\n", __func__, txpwr_ofst->enable);
+    AICWFDBG(LOGDEBUG, "%s:chan_1_4    :%d\r\n", __func__, txpwr_ofst->chan_1_4);
+    AICWFDBG(LOGDEBUG, "%s:chan_5_9    :%d\r\n", __func__, txpwr_ofst->chan_5_9);
+    AICWFDBG(LOGDEBUG, "%s:chan_10_13  :%d\r\n", __func__, txpwr_ofst->chan_10_13);
+    AICWFDBG(LOGDEBUG, "%s:chan_36_64  :%d\r\n", __func__, txpwr_ofst->chan_36_64);
+    AICWFDBG(LOGDEBUG, "%s:chan_100_120:%d\r\n", __func__, txpwr_ofst->chan_100_120);
+    AICWFDBG(LOGDEBUG, "%s:chan_122_140:%d\r\n", __func__, txpwr_ofst->chan_122_140);
+    AICWFDBG(LOGDEBUG, "%s:chan_142_165:%d\r\n", __func__, txpwr_ofst->chan_142_165);
 }
 
 void get_userconfig_txpwr_loss(txpwr_loss_conf_t *txpwr_loss)
@@ -1568,217 +1538,360 @@ void get_userconfig_txpwr_loss(txpwr_loss_conf_t *txpwr_loss)
     txpwr_loss->loss_enable      = userconfig_info.txpwr_loss.loss_enable;
     txpwr_loss->loss_value       = userconfig_info.txpwr_loss.loss_value;
 
-    AICWFDBG(LOGINFO, "%s:loss_enable:%d\r\n",     __func__, txpwr_loss->loss_enable);
-    AICWFDBG(LOGINFO, "%s:loss_value:%d\r\n",      __func__, txpwr_loss->loss_value);
+    AICWFDBG(LOGDEBUG, "%s:loss_enable:%d\r\n",     __func__, txpwr_loss->loss_enable);
+    AICWFDBG(LOGDEBUG, "%s:loss_value:%d\r\n",      __func__, txpwr_loss->loss_value);
 }
 
 void get_userconfig_xtal_cap(xtal_cap_conf_t *xtal_cap)
 {
     *xtal_cap = userconfig_info.xtal_cap;
 
-    AICWFDBG(LOGINFO, "%s:enable       :%d\r\n", __func__, xtal_cap->enable);
-    AICWFDBG(LOGINFO, "%s:xtal_cap     :%d\r\n", __func__, xtal_cap->xtal_cap);
-    AICWFDBG(LOGINFO, "%s:xtal_cap_fine:%d\r\n", __func__, xtal_cap->xtal_cap_fine);
+    AICWFDBG(LOGDEBUG, "%s:enable       :%d\r\n", __func__, xtal_cap->enable);
+    AICWFDBG(LOGDEBUG, "%s:xtal_cap     :%d\r\n", __func__, xtal_cap->xtal_cap);
+    AICWFDBG(LOGDEBUG, "%s:xtal_cap_fine:%d\r\n", __func__, xtal_cap->xtal_cap_fine);
 }
 
-static void rwnx_plat_nvram_set_value(char *command, char *value)
-{
-    //TODO send command
-    AICWFDBG(LOGINFO, "%s:command=%s value=%s\n", __func__, command, value);
-    if (!strcmp(command, "enable")) {
-        userconfig_info.txpwr_lvl.enable = rwnx_atoi(value);
-        userconfig_info.txpwr_lvl_v2.enable = rwnx_atoi(value);
-    } else if (!strcmp(command, "dsss")) {
-        userconfig_info.txpwr_lvl.dsss = rwnx_atoi(value);
-    } else if (!strcmp(command, "ofdmlowrate_2g4")) {
-        userconfig_info.txpwr_lvl.ofdmlowrate_2g4 = rwnx_atoi(value);
-    } else if (!strcmp(command, "ofdm64qam_2g4")) {
-        userconfig_info.txpwr_lvl.ofdm64qam_2g4 = rwnx_atoi(value);
-    } else if (!strcmp(command, "ofdm256qam_2g4")) {
-        userconfig_info.txpwr_lvl.ofdm256qam_2g4 = rwnx_atoi(value);
-    } else if (!strcmp(command, "ofdm1024qam_2g4")) {
-        userconfig_info.txpwr_lvl.ofdm1024qam_2g4 = rwnx_atoi(value);
-    } else if (!strcmp(command, "ofdmlowrate_5g")) {
-        userconfig_info.txpwr_lvl.ofdmlowrate_5g = rwnx_atoi(value);
-    } else if (!strcmp(command, "ofdm64qam_5g")) {
-        userconfig_info.txpwr_lvl.ofdm64qam_5g = rwnx_atoi(value);
-    } else if (!strcmp(command, "ofdm256qam_5g")) {
-        userconfig_info.txpwr_lvl.ofdm256qam_5g = rwnx_atoi(value);
-    } else if (!strcmp(command, "ofdm1024qam_5g")) {
-        userconfig_info.txpwr_lvl.ofdm1024qam_5g = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11b_11ag_1m_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11b_11ag_2g4[0] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11b_11ag_2m_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11b_11ag_2g4[1] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11b_11ag_5m5_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11b_11ag_2g4[2] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11b_11ag_11m_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11b_11ag_2g4[3] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11b_11ag_6m_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11b_11ag_2g4[4] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11b_11ag_9m_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11b_11ag_2g4[5] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11b_11ag_12m_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11b_11ag_2g4[6] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11b_11ag_18m_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11b_11ag_2g4[7] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11b_11ag_24m_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11b_11ag_2g4[8] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11b_11ag_36m_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11b_11ag_2g4[9] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11b_11ag_48m_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11b_11ag_2g4[10] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11b_11ag_54m_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11b_11ag_2g4[11] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11n_11ac_mcs0_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11n_11ac_2g4[0] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11n_11ac_mcs1_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11n_11ac_2g4[1] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11n_11ac_mcs2_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11n_11ac_2g4[2] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11n_11ac_mcs3_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11n_11ac_2g4[3] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11n_11ac_mcs4_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11n_11ac_2g4[4] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11n_11ac_mcs5_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11n_11ac_2g4[5] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11n_11ac_mcs6_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11n_11ac_2g4[6] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11n_11ac_mcs7_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11n_11ac_2g4[7] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11n_11ac_mcs8_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11n_11ac_2g4[8] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11n_11ac_mcs9_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11n_11ac_2g4[9] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11ax_mcs0_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11ax_2g4[0] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11ax_mcs1_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11ax_2g4[1] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11ax_mcs2_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11ax_2g4[2] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11ax_mcs3_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11ax_2g4[3] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11ax_mcs4_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11ax_2g4[4] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11ax_mcs5_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11ax_2g4[5] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11ax_mcs6_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11ax_2g4[6] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11ax_mcs7_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11ax_2g4[7] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11ax_mcs8_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11ax_2g4[8] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11ax_mcs9_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11ax_2g4[9] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11ax_mcs10_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11ax_2g4[10] = rwnx_atoi(value);
-    } else if (!strcmp(command,     "lvl_11ax_mcs11_2g4")) {
-        userconfig_info.txpwr_lvl_v2.pwrlvl_11ax_2g4[11] = rwnx_atoi(value);
-    } else if (!strcmp(command, "loss_enable")) {
-        userconfig_info.txpwr_loss.loss_enable = rwnx_atoi(value);
-    } else if (!strcmp(command, "loss_value")) {
-        userconfig_info.txpwr_loss.loss_value = rwnx_atoi(value);
-    } else if (!strcmp(command, "ofst_enable")) {
-        userconfig_info.txpwr_ofst.enable = rwnx_atoi(value);
-    } else if (!strcmp(command, "ofst_chan_1_4")) {
-        userconfig_info.txpwr_ofst.chan_1_4 = rwnx_atoi(value);
-    } else if (!strcmp(command, "ofst_chan_5_9")) {
-        userconfig_info.txpwr_ofst.chan_5_9 = rwnx_atoi(value);
-    } else if (!strcmp(command, "ofst_chan_10_13")) {
-        userconfig_info.txpwr_ofst.chan_10_13 = rwnx_atoi(value);
-    } else if (!strcmp(command, "ofst_chan_36_64")) {
-        userconfig_info.txpwr_ofst.chan_36_64 = rwnx_atoi(value);
-    } else if (!strcmp(command, "ofst_chan_100_120")) {
-        userconfig_info.txpwr_ofst.chan_100_120 = rwnx_atoi(value);
-    } else if (!strcmp(command, "ofst_chan_122_140")) {
-        userconfig_info.txpwr_ofst.chan_122_140 = rwnx_atoi(value);
-    } else if (!strcmp(command, "ofst_chan_142_165")) {
-        userconfig_info.txpwr_ofst.chan_142_165 = rwnx_atoi(value);
-    } else if (!strcmp(command, "xtal_enable")) {
-        userconfig_info.xtal_cap.enable = rwnx_atoi(value);
-    } else if (!strcmp(command, "xtal_cap")) {
-        userconfig_info.xtal_cap.xtal_cap = rwnx_atoi(value);
-    } else if (!strcmp(command, "xtal_cap_fine")) {
-        userconfig_info.xtal_cap.xtal_cap_fine = rwnx_atoi(value);
-    } else {
-        AICWFDBG(LOGERROR, "invalid cmd: %s\n", command);
+enum rwnx_userconfig_field_type {
+    RWNX_USERCONFIG_U8,
+    RWNX_USERCONFIG_S8,
+    RWNX_USERCONFIG_BOOL,
+};
+
+struct rwnx_userconfig_field {
+    const char *name;
+    size_t offset;
+    enum rwnx_userconfig_field_type type;
+    bool required;
+};
+
+#define RWNX_USERCONFIG_FIELD(_name, _member, _type, _required) \
+    {                                                            \
+        .name = (_name),                                         \
+        .offset = offsetof(userconfig_info_t, _member),           \
+        .type = (_type),                                         \
+        .required = (_required),                                 \
     }
-}
 
-void rwnx_plat_userconfig_parsing(char *buffer, int size)
+static const struct rwnx_userconfig_field rwnx_userconfig_fields[] = {
+    RWNX_USERCONFIG_FIELD("enable", txpwr_lvl_v2.enable,
+                          RWNX_USERCONFIG_BOOL, true),
+    RWNX_USERCONFIG_FIELD("dsss", txpwr_lvl.dsss,
+                          RWNX_USERCONFIG_U8, false),
+    RWNX_USERCONFIG_FIELD("ofdmlowrate_2g4", txpwr_lvl.ofdmlowrate_2g4,
+                          RWNX_USERCONFIG_U8, false),
+    RWNX_USERCONFIG_FIELD("ofdm64qam_2g4", txpwr_lvl.ofdm64qam_2g4,
+                          RWNX_USERCONFIG_U8, false),
+    RWNX_USERCONFIG_FIELD("ofdm256qam_2g4", txpwr_lvl.ofdm256qam_2g4,
+                          RWNX_USERCONFIG_U8, false),
+    RWNX_USERCONFIG_FIELD("ofdm1024qam_2g4", txpwr_lvl.ofdm1024qam_2g4,
+                          RWNX_USERCONFIG_U8, false),
+    RWNX_USERCONFIG_FIELD("ofdmlowrate_5g", txpwr_lvl.ofdmlowrate_5g,
+                          RWNX_USERCONFIG_U8, false),
+    RWNX_USERCONFIG_FIELD("ofdm64qam_5g", txpwr_lvl.ofdm64qam_5g,
+                          RWNX_USERCONFIG_U8, false),
+    RWNX_USERCONFIG_FIELD("ofdm256qam_5g", txpwr_lvl.ofdm256qam_5g,
+                          RWNX_USERCONFIG_U8, false),
+    RWNX_USERCONFIG_FIELD("ofdm1024qam_5g", txpwr_lvl.ofdm1024qam_5g,
+                          RWNX_USERCONFIG_U8, false),
+    RWNX_USERCONFIG_FIELD("lvl_11b_11ag_1m_2g4",
+                          txpwr_lvl_v2.pwrlvl_11b_11ag_2g4[0],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11b_11ag_2m_2g4",
+                          txpwr_lvl_v2.pwrlvl_11b_11ag_2g4[1],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11b_11ag_5m5_2g4",
+                          txpwr_lvl_v2.pwrlvl_11b_11ag_2g4[2],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11b_11ag_11m_2g4",
+                          txpwr_lvl_v2.pwrlvl_11b_11ag_2g4[3],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11b_11ag_6m_2g4",
+                          txpwr_lvl_v2.pwrlvl_11b_11ag_2g4[4],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11b_11ag_9m_2g4",
+                          txpwr_lvl_v2.pwrlvl_11b_11ag_2g4[5],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11b_11ag_12m_2g4",
+                          txpwr_lvl_v2.pwrlvl_11b_11ag_2g4[6],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11b_11ag_18m_2g4",
+                          txpwr_lvl_v2.pwrlvl_11b_11ag_2g4[7],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11b_11ag_24m_2g4",
+                          txpwr_lvl_v2.pwrlvl_11b_11ag_2g4[8],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11b_11ag_36m_2g4",
+                          txpwr_lvl_v2.pwrlvl_11b_11ag_2g4[9],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11b_11ag_48m_2g4",
+                          txpwr_lvl_v2.pwrlvl_11b_11ag_2g4[10],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11b_11ag_54m_2g4",
+                          txpwr_lvl_v2.pwrlvl_11b_11ag_2g4[11],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11n_11ac_mcs0_2g4",
+                          txpwr_lvl_v2.pwrlvl_11n_11ac_2g4[0],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11n_11ac_mcs1_2g4",
+                          txpwr_lvl_v2.pwrlvl_11n_11ac_2g4[1],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11n_11ac_mcs2_2g4",
+                          txpwr_lvl_v2.pwrlvl_11n_11ac_2g4[2],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11n_11ac_mcs3_2g4",
+                          txpwr_lvl_v2.pwrlvl_11n_11ac_2g4[3],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11n_11ac_mcs4_2g4",
+                          txpwr_lvl_v2.pwrlvl_11n_11ac_2g4[4],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11n_11ac_mcs5_2g4",
+                          txpwr_lvl_v2.pwrlvl_11n_11ac_2g4[5],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11n_11ac_mcs6_2g4",
+                          txpwr_lvl_v2.pwrlvl_11n_11ac_2g4[6],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11n_11ac_mcs7_2g4",
+                          txpwr_lvl_v2.pwrlvl_11n_11ac_2g4[7],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11n_11ac_mcs8_2g4",
+                          txpwr_lvl_v2.pwrlvl_11n_11ac_2g4[8],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11n_11ac_mcs9_2g4",
+                          txpwr_lvl_v2.pwrlvl_11n_11ac_2g4[9],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11ax_mcs0_2g4",
+                          txpwr_lvl_v2.pwrlvl_11ax_2g4[0],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11ax_mcs1_2g4",
+                          txpwr_lvl_v2.pwrlvl_11ax_2g4[1],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11ax_mcs2_2g4",
+                          txpwr_lvl_v2.pwrlvl_11ax_2g4[2],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11ax_mcs3_2g4",
+                          txpwr_lvl_v2.pwrlvl_11ax_2g4[3],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11ax_mcs4_2g4",
+                          txpwr_lvl_v2.pwrlvl_11ax_2g4[4],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11ax_mcs5_2g4",
+                          txpwr_lvl_v2.pwrlvl_11ax_2g4[5],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11ax_mcs6_2g4",
+                          txpwr_lvl_v2.pwrlvl_11ax_2g4[6],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11ax_mcs7_2g4",
+                          txpwr_lvl_v2.pwrlvl_11ax_2g4[7],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11ax_mcs8_2g4",
+                          txpwr_lvl_v2.pwrlvl_11ax_2g4[8],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11ax_mcs9_2g4",
+                          txpwr_lvl_v2.pwrlvl_11ax_2g4[9],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11ax_mcs10_2g4",
+                          txpwr_lvl_v2.pwrlvl_11ax_2g4[10],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("lvl_11ax_mcs11_2g4",
+                          txpwr_lvl_v2.pwrlvl_11ax_2g4[11],
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("loss_enable", txpwr_loss.loss_enable,
+                          RWNX_USERCONFIG_BOOL, true),
+    RWNX_USERCONFIG_FIELD("loss_value", txpwr_loss.loss_value,
+                          RWNX_USERCONFIG_U8, true),
+    RWNX_USERCONFIG_FIELD("ofst_enable", txpwr_ofst.enable,
+                          RWNX_USERCONFIG_BOOL, true),
+    RWNX_USERCONFIG_FIELD("ofst_chan_1_4", txpwr_ofst.chan_1_4,
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("ofst_chan_5_9", txpwr_ofst.chan_5_9,
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("ofst_chan_10_13", txpwr_ofst.chan_10_13,
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("ofst_chan_36_64", txpwr_ofst.chan_36_64,
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("ofst_chan_100_120", txpwr_ofst.chan_100_120,
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("ofst_chan_122_140", txpwr_ofst.chan_122_140,
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("ofst_chan_142_165", txpwr_ofst.chan_142_165,
+                          RWNX_USERCONFIG_S8, true),
+    RWNX_USERCONFIG_FIELD("xtal_enable", xtal_cap.enable,
+                          RWNX_USERCONFIG_BOOL, true),
+    RWNX_USERCONFIG_FIELD("xtal_cap", xtal_cap.xtal_cap,
+                          RWNX_USERCONFIG_U8, true),
+    RWNX_USERCONFIG_FIELD("xtal_cap_fine", xtal_cap.xtal_cap_fine,
+                          RWNX_USERCONFIG_U8, true),
+};
+
+#define RWNX_USERCONFIG_MAX_LINE_LEN 256
+
+static int
+rwnx_plat_userconfig_set_value(userconfig_info_t *config,
+                               const char *command, const char *value,
+                               bool *seen, unsigned int line_no)
 {
-    int i = 0;
-    int parse_state = 0;
-    char command[30];
-    char value[100];
-    int char_counter = 0;
+    const struct rwnx_userconfig_field *field = NULL;
+    u8 *target;
+    int parsed;
+    int ret;
+    size_t i;
 
-    memset(command, 0, 30);
-    memset(value, 0, 100);
-
-    for (i = 0; i < size; i++) {
-        //Send command or print nvram log when char is \r or \n
-        if (buffer[i] == 0x0a || buffer[i] == 0x0d) {
-            if (command[0] != 0 && value[0] != 0) {
-                if (parse_state == PRINT) {
-                    AICWFDBG(LOGINFO, "%s:%s\r\n", __func__, value);
-                } else if (parse_state == GET_VALUE) {
-                    rwnx_plat_nvram_set_value(command, value);
-                }
-            }
-            //Reset command value and char_counter
-            memset(command, 0, 30);
-            memset(value, 0, 100);
-            char_counter = 0;
-            parse_state = INIT;
-            continue;
-        }
-
-        //Switch parser state
-        if (parse_state == INIT) {
-            if (buffer[i] == '#') {
-                parse_state = PRINT;
-                continue;
-            } else if (buffer[i] == 0x0a || buffer[i] == 0x0d) {
-                parse_state = INIT;
-                continue;
-            } else {
-                parse_state = CMD;
-            }
-        }
-
-        //Fill data to command and value
-        if (parse_state == PRINT) {
-            command[0] = 0x01;
-            value[char_counter] = buffer[i];
-            char_counter++;
-        } else if (parse_state == CMD) {
-            if (command[0] != 0 && buffer[i] == '=') {
-                parse_state = GET_VALUE;
-                char_counter = 0;
-                continue;
-            }
-            command[char_counter] = buffer[i];
-            char_counter++;
-        } else if (parse_state == GET_VALUE) {
-            value[char_counter] = buffer[i];
-            char_counter++;
+    for (i = 0; i < ARRAY_SIZE(rwnx_userconfig_fields); i++) {
+        if (!strcmp(command, rwnx_userconfig_fields[i].name)) {
+            field = &rwnx_userconfig_fields[i];
+            break;
         }
     }
+
+    if (!field) {
+        AICWFDBG(LOGERROR, "userconfig line %u: unknown key '%s'\n",
+                 line_no, command);
+        return -ENOENT;
+    }
+    if (seen[i]) {
+        AICWFDBG(LOGERROR, "userconfig line %u: duplicate key '%s'\n",
+                 line_no, command);
+        return -EEXIST;
+    }
+
+    ret = kstrtoint(value, 10, &parsed);
+    if (ret) {
+        AICWFDBG(LOGERROR,
+                 "userconfig line %u: invalid integer for '%s': '%s'\n",
+                 line_no, command, value);
+        return ret;
+    }
+
+    switch (field->type) {
+    case RWNX_USERCONFIG_BOOL:
+        if (parsed < 0 || parsed > 1)
+            return -ERANGE;
+        break;
+    case RWNX_USERCONFIG_U8:
+        if (parsed < 0 || parsed > 255)
+            return -ERANGE;
+        break;
+    case RWNX_USERCONFIG_S8:
+        if (parsed < -128 || parsed > 127)
+            return -ERANGE;
+        break;
+    }
+
+    target = (u8 *)config + field->offset;
+    if (field->type == RWNX_USERCONFIG_S8)
+        *(s8 *)target = (s8)parsed;
+    else
+        *target = (u8)parsed;
+    seen[i] = true;
+
+    AICWFDBG(LOGDEBUG, "userconfig line=%u key=%s value=%d\n",
+             line_no, command, parsed);
+    return 0;
 }
 
-/**
- * rwnx_plat_userconfig_load  ---Load aic_userconfig.txt
- *@filename name of config
-*/
-static int rwnx_plat_userconfig_load(struct rwnx_hw *rwnx_hw) {
+int rwnx_plat_userconfig_parsing(const char *buffer, size_t size)
+{
+    userconfig_info_t parsed = userconfig_defaults;
+    bool seen[ARRAY_SIZE(rwnx_userconfig_fields)] = { false };
+    char line[RWNX_USERCONFIG_MAX_LINE_LEN];
+    unsigned int line_no = 0;
+    size_t offset = 0;
+    size_t i;
 
-	if(rwnx_hw->usbdev->chipid == PRODUCT_ID_AIC8800DC ||
-		rwnx_hw->usbdev->chipid == PRODUCT_ID_AIC8800DW){
-		rwnx_plat_userconfig_load_8800dc(rwnx_hw);
-	}
+    if (!buffer || !size)
+        return -EINVAL;
 
-	return 0;
+    while (offset < size) {
+        const char *start = buffer + offset;
+        const char *end = memchr(start, '\n', size - offset);
+        char *command;
+        char *separator;
+        char *value;
+        size_t raw_len = end ? (size_t)(end - start) : size - offset;
+        size_t line_len = raw_len;
+        int ret;
+
+        line_no++;
+        if (line_len && start[line_len - 1] == '\r')
+            line_len--;
+        if (line_len >= sizeof(line)) {
+            AICWFDBG(LOGERROR,
+                     "userconfig line %u exceeds %zu bytes\n",
+                     line_no, sizeof(line) - 1);
+            return -E2BIG;
+        }
+        if (memchr(start, '\0', line_len)) {
+            AICWFDBG(LOGERROR,
+                     "userconfig line %u contains a NUL byte\n", line_no);
+            return -EINVAL;
+        }
+
+        memcpy(line, start, line_len);
+        line[line_len] = '\0';
+        command = strim(line);
+        if (*command && *command != '#') {
+            separator = strchr(command, '=');
+            if (!separator || strchr(separator + 1, '=')) {
+                AICWFDBG(LOGERROR,
+                         "userconfig line %u: expected one key=value pair\n",
+                         line_no);
+                return -EINVAL;
+            }
+
+            *separator = '\0';
+            value = strim(separator + 1);
+            command = strim(command);
+            if (!*command || !*value) {
+                AICWFDBG(LOGERROR,
+                         "userconfig line %u: key and value are required\n",
+                         line_no);
+                return -EINVAL;
+            }
+
+            ret = rwnx_plat_userconfig_set_value(&parsed, command, value,
+                                                  seen, line_no);
+            if (ret) {
+                if (ret == -ERANGE)
+                    AICWFDBG(LOGERROR,
+                             "userconfig line %u: value for '%s' is out of range\n",
+                             line_no, command);
+                return ret;
+            }
+        }
+
+        offset += raw_len + (end ? 1 : 0);
+    }
+
+    for (i = 0; i < ARRAY_SIZE(rwnx_userconfig_fields); i++) {
+        if (rwnx_userconfig_fields[i].required && !seen[i]) {
+            AICWFDBG(LOGERROR, "userconfig missing required key '%s'\n",
+                     rwnx_userconfig_fields[i].name);
+            return -EINVAL;
+        }
+    }
+
+    parsed.txpwr_lvl.enable = parsed.txpwr_lvl_v2.enable;
+    userconfig_info = parsed;
+    return 0;
+}
+
+/* Load the per-product user configuration, retaining built-in defaults. */
+static int rwnx_plat_userconfig_load(struct rwnx_hw *rwnx_hw)
+{
+    int ret = 0;
+
+    userconfig_info = userconfig_defaults;
+
+    if (rwnx_hw->usbdev->chipid == PRODUCT_ID_AIC8800DC)
+        ret = rwnx_plat_userconfig_load_8800dc(rwnx_hw);
+    else if (rwnx_hw->usbdev->chipid == PRODUCT_ID_AIC8800DW)
+        ret = rwnx_plat_userconfig_load_8800dw(rwnx_hw);
+
+    if (ret)
+        AICWFDBG(LOGERROR,
+                 "external userconfig unavailable; using built-in defaults\n");
+
+    return 0;
 }
 
 
@@ -2026,4 +2139,3 @@ MODULE_FIRMWARE(RWNX_MAC_FW_NAME);
 #ifndef CONFIG_RWNX_TL4
 MODULE_FIRMWARE(RWNX_MAC_FW_NAME2);
 #endif
-

@@ -123,7 +123,7 @@ int rwnx_request_firmware_common(struct rwnx_hw *rwnx_hw, u32 **buffer,
 void rwnx_release_firmware_common(u32 **buffer);
 int rwnx_plat_bin_fw_upload_2(struct rwnx_hw *rwnx_hw, u32 fw_addr,
                               char *filename);
-void rwnx_plat_userconfig_parsing(char *buffer, int size);
+int rwnx_plat_userconfig_parsing(const char *buffer, size_t size);
 int rwnx_platform_register_drv(void);
 void rwnx_platform_unregister_drv(void);
 

@@ -5,8 +5,8 @@
 - These instructions apply to the entire repository.
 - The maintained driver source is under
   `code/src/AIC8800/drivers/aic8800`.
-- The currently supported and validated target is USB on Ubuntu 24.04,
-  Linux 6.8.x, amd64.
+- The currently supported and validated target is USB on Ubuntu 22.04.5 LTS
+  with the HWE Linux 6.8.x kernel, amd64.
 - The retained SDIO source is upstream reference code. Do not modify it or
   claim that it is supported or buildable unless the user explicitly asks for
   SDIO work.
@@ -54,9 +54,14 @@ configuration override, and optional sparse examples are:
 ```bash
 ./code/scripts/build-test.sh 6.8.0-xx-generic
 ./code/scripts/build-test.sh --warnings 6.8.0-xx-generic
+./code/scripts/build-test.sh --extra-warnings 6.8.0-xx-generic
 ./code/scripts/build-test.sh --config CONFIG_USB_RX_AGGR=y 6.8.0-xx-generic
 ./code/scripts/build-test.sh --sparse 6.8.0-xx-generic
 ```
+
+`--warnings` uses Kbuild `W=e`, so ordinary compiler warnings are fatal.
+`--extra-warnings` uses advisory `W=1`; do not present it as a fatal warning
+gate or hide its findings with suppression flags.
 
 Use the repository-wide compile-only check before handing off driver changes:
 
@@ -70,6 +75,8 @@ latest-kernel build, and these optional USB compile paths:
 
 - `CONFIG_USB_RX_AGGR=y`
 - `CONFIG_RX_TASKLET=y`
+- `CONFIG_TX_TASKLET=y`
+- `CONFIG_RX_TASKLET=y CONFIG_TX_TASKLET=y`
 - `CONFIG_USB_TX_AGGR=y`
 - `CONFIG_PREALLOC_RX_SKB=y`
 - `CONFIG_USB_MSG_IN_EP=n`
@@ -79,6 +86,11 @@ compiler executable-name mismatch is acceptable when the compiler version is
 identical to the kernel build compiler. Skipped BTF generation is also
 acceptable when the target kernel has no usable `vmlinux`. Do not hide newly
 introduced compiler warnings with additional warning-suppression flags.
+
+Use `./code/scripts/verify-firmware.sh` to verify both checksums and exact
+manifest coverage. Compile and DKMS scripts stage sources through
+`code/scripts/lib/common.sh`; generated Kbuild files are excluded from the
+staged copy, never deleted from the working tree.
 
 ## Version management
 

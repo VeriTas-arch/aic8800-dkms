@@ -13,8 +13,13 @@
   `13551eb7d0fec9c6b96c23e7e4a04a7adc7d8401fb18c450bb40f6fb1316120a`
 - 仓库中的 12 个 AIC8800DC 固件二进制与该官方包逐文件一致；
   `aic_userconfig_8800dc.txt` 仅省略了末尾空行
-- 官方包额外包含的 AIC8800DW 配置不属于当前已支持的 AIC8800DC 设备路径，
-  因此未引入本仓库
+- 同一官方包中的 `aic_userconfig_8800dw.txt` 和
+  `aic_userconfig_8800dw_2357.txt` 原样纳入清单；SHA-256 分别为
+  `1acebc464acc5c3d512e81fee9870e044386af6a57d558f3d7bfe635bfd4de95` 和
+  `414edbb2b724be2b74eb9732b5197cba2590be5670f8e585d436554f45d63992`
+- TP-Link/Mercury `2357:0147` 使用产品专用 DW 配置；其他 DW 设备使用通用
+  DW 配置，DC 设备继续使用 DC 配置。缺失或格式错误时按兼容顺序回退，
+  最后才使用驱动内置默认值
 
 ## 目录说明
 
@@ -25,7 +30,7 @@
 
 ## 适用范围
 
-- 已验证环境：Ubuntu 24.04、Linux 6.8.x、amd64
+- 已验证环境：Ubuntu 22.04.5 LTS（HWE）、Linux 6.8.x、amd64
 - 主要场景：USB 设备上电后先枚举为存储态（Aic MSC），再通过规则触发切换到无线驱动态
 
 ## 前置依赖
@@ -99,8 +104,10 @@ chmod +x code/scripts/build-test.sh
 - 单内核安装失败或被中断时，也会恢复该版本原有的 `/usr/src` 源码和目标内核状态
 - 若旧 DKMS 状态涉及缺少 headers 的内核，全内核刷新会在任何变更前停止，避免删除无法重建的模块
 - 复制源码目录 `code/src/AIC8800/drivers/aic8800` 到 `/usr/src/aic8800fdrv-<version>/`
+- 复制时排除并复核 `.cmd`、`.o`、`Module.symvers` 等 Kbuild 临时产物，
+  不删除开发工作树中的忽略文件
 - 同步 `dkms.conf` 中的 `PACKAGE_VERSION`
-- 安装前用 `SHA256SUMS` 校验仓库中的固件
+- 安装前用 `SHA256SUMS` 校验仓库中的固件，并确认所有文件都恰好被清单覆盖
 - 安装固件目录 `code/src/AIC8800/fw/aic8800DC` 到 `/lib/firmware/aic8800DC`
 - 安装 udev 规则 `code/src/AIC8800/aic.rules` 到 `/etc/udev/rules.d/aic.rules`
 - 只重新加载 udev 规则，不再对全系统设备执行无范围的 `udevadm trigger`；需要重新插拔 AIC 设备使规则生效
@@ -145,7 +152,8 @@ IPv4 地址进行脱敏；以 root 运行才能读取 debugfs 和完整内核日
 sudo ./code/scripts/collect-runtime-logs.sh --minutes 30 --output /tmp/aic8800-runtime.log
 ```
 
-`runtime_stats` 首行包含 schema、计数范围、设备代次和运行时长。`conn_guard_*`
+`runtime_stats` 的 schema 3 包含计数范围、设备代次、运行时长、USB VID/PID、
+实际采用的用户配置，以及配置加载、解析和回退计数。`conn_guard_*`
 从模块初始化开始累计；其余计数按当前设备代次累计，USB 重新枚举后会从零开始。
 重点比较同一 `device_generation` 下异常前后两次快照：命令池耗尽/高水位、总线
 关闭拒绝、发送失败、超时或过大 CFM，固件连接拒绝，USB 数据端点与消息端点各自

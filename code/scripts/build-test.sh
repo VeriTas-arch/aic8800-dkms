@@ -5,9 +5,11 @@ info() { echo "[INFO] $*"; }
 error() { echo "[ERROR] $*" >&2; }
 
 usage() {
-    echo "Usage: $0 [--warnings] [--sparse] [--config NAME=VALUE] [kernel-version]"
+    echo "Usage: $0 [--warnings|--extra-warnings] [--sparse] [--config NAME=VALUE] [kernel-version]"
     echo "Example: $0"
     echo "Example: $0 --warnings --config CONFIG_USB_RX_AGGR=y 6.8.0-138-generic"
+    echo "  --warnings        make ordinary compiler warnings fatal (W=e)"
+    echo "  --extra-warnings  enable advisory Kbuild warnings (W=1)"
 }
 
 require_cmd() {
@@ -18,6 +20,7 @@ require_cmd() {
 }
 
 WARNINGS=0
+EXTRA_WARNINGS=0
 SPARSE=0
 KERNEL_VER=""
 CONFIG_OVERRIDES=()
@@ -27,6 +30,10 @@ while (($#)); do
     case "$1" in
         --warnings)
             WARNINGS=1
+            shift
+            ;;
+        --extra-warnings)
+            EXTRA_WARNINGS=1
             shift
             ;;
         --sparse)
@@ -66,6 +73,11 @@ while (($#)); do
     esac
 done
 
+if ((WARNINGS && EXTRA_WARNINGS)); then
+    error "--warnings and --extra-warnings are mutually exclusive"
+    exit 2
+fi
+
 for override in "${CONFIG_OVERRIDES[@]}"; do
     if [[ ! "$override" =~ ^CONFIG_[A-Z0-9_]+=[A-Za-z0-9_./:+-]+$ ]]; then
         error "invalid configuration override: $override"
@@ -96,6 +108,8 @@ if ((BUILD_LOAD_FW == 0 && BUILD_WLAN == 0)); then
 fi
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=lib/common.sh
+source "$REPO_ROOT/scripts/lib/common.sh"
 SOURCE_DIR="$REPO_ROOT/src/AIC8800/drivers/aic8800"
 VERSION_FILE="$REPO_ROOT/VERSION"
 KERNEL_VER="${KERNEL_VER:-$(uname -r)}"
@@ -103,10 +117,10 @@ KERNEL_BUILD_DIR="/lib/modules/$KERNEL_VER/build"
 BUILD_PARENT="${TMPDIR:-/tmp}"
 BUILD_ROOT=""
 
-require_cmd cp
 require_cmd make
 require_cmd mktemp
 require_cmd modinfo
+require_cmd tar
 if ((SPARSE)); then
     require_cmd sparse
 fi
@@ -151,7 +165,10 @@ info "Kernel : $KERNEL_VER"
 info "Build  : $BUILD_ROOT"
 info "Mode   : compile only (no DKMS, install, module load, or network changes)"
 if ((WARNINGS)); then
-    info "Checks : extra compiler warnings enabled and fatal (W=1 WERROR=1)"
+    info "Checks : ordinary compiler warnings are fatal (W=e)"
+fi
+if ((EXTRA_WARNINGS)); then
+    info "Checks : advisory extra compiler warnings enabled (W=1)"
 fi
 if ((SPARSE)); then
     info "Checks : sparse semantic analysis enabled (C=1)"
@@ -160,7 +177,7 @@ if ((${#CONFIG_OVERRIDES[@]})); then
     info "Config : ${CONFIG_OVERRIDES[*]}"
 fi
 
-cp -a "$SOURCE_DIR/." "$BUILD_ROOT/"
+aic_stage_driver_source "$SOURCE_DIR" "$BUILD_ROOT"
 
 make_args=(
     -C "$BUILD_ROOT"
@@ -171,7 +188,10 @@ make_args=(
 )
 make_args+=("${CONFIG_OVERRIDES[@]}")
 if ((WARNINGS)); then
-    make_args+=(W=1 WERROR=1)
+    make_args+=(W=e)
+fi
+if ((EXTRA_WARNINGS)); then
+    make_args+=(W=1)
 fi
 if ((SPARSE)); then
     make_args+=(C=1 CHECK=sparse)

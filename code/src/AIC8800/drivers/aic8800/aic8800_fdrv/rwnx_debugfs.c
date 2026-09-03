@@ -602,6 +602,9 @@ static ssize_t rwnx_dbgfs_runtime_stats_read(struct file *file,
     int len;
     ssize_t read;
     u64 uptime_ms;
+    u16 vendor_id = 0;
+    u16 product_id = 0;
+    const char *userconfig_profile;
 
     buf = kmalloc(bufsz, GFP_KERNEL);
     if (!buf)
@@ -609,14 +612,32 @@ static ssize_t rwnx_dbgfs_runtime_stats_read(struct file *file,
 
     uptime_ms = jiffies64_to_msecs(get_jiffies_64() -
                                    stats->started_jiffies);
+    userconfig_profile = stats->userconfig_profile[0] ?
+                         stats->userconfig_profile : "<unset>";
+#ifdef AICWF_USB_SUPPORT
+    if (priv->usbdev && priv->usbdev->udev) {
+        vendor_id = le16_to_cpu(priv->usbdev->udev->descriptor.idVendor);
+        product_id = le16_to_cpu(priv->usbdev->udev->descriptor.idProduct);
+    }
+#endif
     len = scnprintf(buf, bufsz,
-                    "schema_version=2\n"
+                    "schema_version=3\n"
                     "conn_guard_scope=module_lifetime\n"
                     "runtime_scope=device_generation\n"
                     "device_generation=%u\n"
-                    "device_uptime_ms=%llu\n",
+                    "device_uptime_ms=%llu\n"
+                    "usb_vendor_id=0x%04x\n"
+                    "usb_product_id=0x%04x\n"
+                    "userconfig_profile=%s\n"
+                    "userconfig_load_failures=%d\n"
+                    "userconfig_parse_errors=%d\n"
+                    "userconfig_fallbacks=%d\n",
                     stats->device_generation,
-                    (unsigned long long)uptime_ms);
+                    (unsigned long long)uptime_ms,
+                    vendor_id, product_id, userconfig_profile,
+                    atomic_read(&stats->userconfig_load_failures),
+                    atomic_read(&stats->userconfig_parse_errors),
+                    atomic_read(&stats->userconfig_fallbacks));
     len += rwnx_conn_guard_stats_format(buf + len, bufsz - len);
     len += scnprintf(buf + len, bufsz - len,
                      "conn_firmware_rejects=%d\n",

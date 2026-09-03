@@ -1106,7 +1106,10 @@ fail:
 }
 
 #ifdef CONFIG_TX_TASKLET
-void aicwf_tasklet_tx_process(struct aic_usb_dev *usb_dev){
+void aicwf_tasklet_tx_process(unsigned long data)
+{
+	struct aic_usb_dev *usb_dev = (struct aic_usb_dev *)data;
+
 	aicwf_usb_tx_process(usb_dev);
 }
 #endif

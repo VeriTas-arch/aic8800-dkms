@@ -17,12 +17,12 @@ done
 info "Check shell syntax"
 while IFS= read -r -d '' script; do
     bash -n "$script"
-done < <(find "$SCRIPT_DIR" -maxdepth 1 -type f -name '*.sh' -print0)
+done < <(find "$SCRIPT_DIR" -type f -name '*.sh' -print0)
 
 if command -v shellcheck >/dev/null 2>&1; then
     info "Check shell scripts with shellcheck"
     mapfile -d '' -t shell_scripts < <(
-        find "$SCRIPT_DIR" -maxdepth 1 -type f -name '*.sh' -print0
+        find "$SCRIPT_DIR" -type f -name '*.sh' -print0
     )
     shellcheck "${shell_scripts[@]}"
 else
@@ -35,8 +35,12 @@ bash "$SCRIPT_DIR/test-sync-version.sh"
 info "Check version metadata"
 "$SCRIPT_DIR/sync-version.sh" --check
 
+info "Check firmware manifest coverage"
+"$SCRIPT_DIR/verify-firmware.sh"
+
 info "Check tracked whitespace"
 git -C "$REPO_ROOT" diff --check
+git -C "$REPO_ROOT" diff --cached --check
 
 mapfile -t kernels < <(
     for build_dir in /lib/modules/*/build; do
@@ -63,6 +67,8 @@ info "Strict warning build: $newest_kernel"
 declare -a variant_names=(
     usb-rx-aggregate
     usb-rx-tasklet
+    usb-tx-tasklet
+    usb-rx-tx-tasklets
     usb-tx-aggregate
     usb-preallocated-rx
     usb-no-dedicated-message-endpoint
@@ -70,6 +76,8 @@ declare -a variant_names=(
 declare -a variant_configs=(
     "CONFIG_USB_RX_AGGR=y"
     "CONFIG_RX_TASKLET=y"
+    "CONFIG_TX_TASKLET=y"
+    "CONFIG_RX_TASKLET=y CONFIG_TX_TASKLET=y"
     "CONFIG_USB_TX_AGGR=y"
     "CONFIG_PREALLOC_RX_SKB=y"
     "CONFIG_USB_MSG_IN_EP=n"

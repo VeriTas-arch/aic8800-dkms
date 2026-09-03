@@ -26,6 +26,9 @@
 #define RWNX_MAC_RF_PATCH_BASE_NAME_8800DC     "fmacfw_rf_patch_8800dc"
 #define RWNX_MAC_RF_PATCH_NAME_8800DC RWNX_MAC_RF_PATCH_BASE_NAME_8800DC".bin"
 #define FW_USERCONFIG_NAME_8800DC         "aic_userconfig_8800dc.txt"
+#define FW_USERCONFIG_NAME_8800DW         "aic_userconfig_8800dw.txt"
+#define FW_USERCONFIG_NAME_8800DW_2357    "aic_userconfig_8800dw_2357.txt"
+#define FW_USERCONFIG_NAME_DEFAULTS       "built-in-defaults"
 
 typedef u32 (*array2_tbl_t)[2];
 
@@ -1997,31 +2000,112 @@ int aicwf_plat_patch_load_8800dc(struct rwnx_hw *rwnx_hw){
     return ret;
 }
 
-int	rwnx_plat_userconfig_load_8800dc(struct rwnx_hw *rwnx_hw){
+static void rwnx_userconfig_set_profile(struct rwnx_hw *rwnx_hw,
+                                        const char *profile)
+{
+    strscpy(rwnx_hw->runtime_stats.userconfig_profile, profile,
+            sizeof(rwnx_hw->runtime_stats.userconfig_profile));
+}
+
+static void rwnx_userconfig_log_result(struct rwnx_hw *rwnx_hw,
+                                       const char *chip,
+                                       const char *requested,
+                                       const char *applied,
+                                       bool fallback, int status)
+{
+    u16 vid = le16_to_cpu(rwnx_hw->usbdev->udev->descriptor.idVendor);
+    u16 pid = le16_to_cpu(rwnx_hw->usbdev->udev->descriptor.idProduct);
+
+    if (status) {
+        AICWFDBG(LOGERROR,
+                 "userconfig chip=%s vid=0x%04x pid=0x%04x requested=%s applied=%s fallback=%u status=%d\n",
+                 chip, vid, pid, requested, applied, fallback, status);
+    } else {
+        AICWFDBG(LOGINFO,
+                 "userconfig chip=%s vid=0x%04x pid=0x%04x requested=%s applied=%s fallback=%u status=ok\n",
+                 chip, vid, pid, requested, applied, fallback);
+    }
+}
+
+static int rwnx_plat_userconfig_load_file(struct rwnx_hw *rwnx_hw,
+                                          const char *filename)
+{
+    u32 *data = NULL;
     int size;
-    u32 *dst=NULL;
-    char *filename = FW_USERCONFIG_NAME_8800DC;
+    int ret;
 
-    AICWFDBG(LOGINFO, "userconfig file path:%s \r\n", filename);
-
-    /* load file */
-    size = rwnx_request_firmware_common(rwnx_hw, &dst, filename);
+    size = rwnx_request_firmware_common(rwnx_hw, &data, filename);
     if (size <= 0) {
-            AICWFDBG(LOGERROR, "wrong size of firmware file\n");
-            dst = NULL;
-            return 0;
+        atomic_inc(&rwnx_hw->runtime_stats.userconfig_load_failures);
+        return size < 0 ? -ENOENT : -EINVAL;
     }
 
-	/* Copy the file on the Embedded side */
-    AICWFDBG(LOGINFO, "### Load file done: %s, size=%d\n", filename, size);
+    ret = rwnx_plat_userconfig_parsing((const char *)data, size);
+    rwnx_release_firmware_common(&data);
+    if (ret) {
+        atomic_inc(&rwnx_hw->runtime_stats.userconfig_load_failures);
+        atomic_inc(&rwnx_hw->runtime_stats.userconfig_parse_errors);
+        return ret;
+    }
 
-	rwnx_plat_userconfig_parsing((char *)dst, size);
-
-    rwnx_release_firmware_common(&dst);
-
-    AICWFDBG(LOGINFO, "userconfig download complete\n\n");
+    rwnx_userconfig_set_profile(rwnx_hw, filename);
     return 0;
+}
 
+int rwnx_plat_userconfig_load_8800dc(struct rwnx_hw *rwnx_hw)
+{
+    const char *requested = FW_USERCONFIG_NAME_8800DC;
+    int ret;
+
+    ret = rwnx_plat_userconfig_load_file(rwnx_hw, requested);
+    if (ret) {
+        atomic_inc(&rwnx_hw->runtime_stats.userconfig_fallbacks);
+        rwnx_userconfig_set_profile(rwnx_hw,
+                                    FW_USERCONFIG_NAME_DEFAULTS);
+        rwnx_userconfig_log_result(rwnx_hw, "AIC8800DC", requested,
+                                   FW_USERCONFIG_NAME_DEFAULTS, true, ret);
+        return ret;
+    }
+
+    rwnx_userconfig_log_result(rwnx_hw, "AIC8800DC", requested,
+                               requested, false, 0);
+    return 0;
+}
+
+int rwnx_plat_userconfig_load_8800dw(struct rwnx_hw *rwnx_hw)
+{
+    const char *profiles[3];
+    const char *requested;
+    const char *applied;
+    u16 vid = le16_to_cpu(rwnx_hw->usbdev->udev->descriptor.idVendor);
+    u16 pid = le16_to_cpu(rwnx_hw->usbdev->udev->descriptor.idProduct);
+    size_t profile_count = 0;
+    size_t i;
+    int ret = -ENOENT;
+
+    if (vid == USB_VENDOR_ID_TP && pid == USB_PRODUCT_ID_TP)
+        profiles[profile_count++] = FW_USERCONFIG_NAME_8800DW_2357;
+    profiles[profile_count++] = FW_USERCONFIG_NAME_8800DW;
+    profiles[profile_count++] = FW_USERCONFIG_NAME_8800DC;
+    requested = profiles[0];
+
+    for (i = 0; i < profile_count; i++) {
+        ret = rwnx_plat_userconfig_load_file(rwnx_hw, profiles[i]);
+        if (!ret) {
+            applied = profiles[i];
+            if (i)
+                atomic_inc(&rwnx_hw->runtime_stats.userconfig_fallbacks);
+            rwnx_userconfig_log_result(rwnx_hw, "AIC8800DW", requested,
+                                       applied, i != 0, 0);
+            return 0;
+        }
+    }
+
+    atomic_inc(&rwnx_hw->runtime_stats.userconfig_fallbacks);
+    rwnx_userconfig_set_profile(rwnx_hw, FW_USERCONFIG_NAME_DEFAULTS);
+    rwnx_userconfig_log_result(rwnx_hw, "AIC8800DW", requested,
+                               FW_USERCONFIG_NAME_DEFAULTS, true, ret);
+    return ret;
 }
 
 

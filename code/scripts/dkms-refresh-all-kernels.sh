@@ -91,6 +91,8 @@ on_exit() {
 }
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=lib/common.sh
+source "$REPO_ROOT/scripts/lib/common.sh"
 MODULE_NAME="aic8800fdrv"
 VERSION_FILE="$REPO_ROOT/VERSION"
 SOURCE_DIR="$REPO_ROOT/src/AIC8800/drivers/aic8800"
@@ -100,6 +102,7 @@ RULES_SRC="$REPO_ROOT/src/AIC8800/aic.rules"
 RULES_DST="/etc/udev/rules.d/aic.rules"
 BUILD_TEST="$REPO_ROOT/scripts/build-test.sh"
 VERSION_CHECK="$REPO_ROOT/scripts/sync-version.sh"
+FIRMWARE_CHECK="$REPO_ROOT/scripts/verify-firmware.sh"
 
 if [[ ! -f "$VERSION_FILE" ]]; then
     error "VERSION file not found: $VERSION_FILE"
@@ -200,8 +203,8 @@ for kernel_ver in "${KERNELS[@]}"; do
 done
 
 if [[ -f "$FW_SRC_DIR/SHA256SUMS" ]]; then
-    info "Verify firmware checksums"
-    (cd "$FW_SRC_DIR" && sha256sum -c SHA256SUMS)
+    info "Verify firmware checksums and manifest coverage"
+    "$FIRMWARE_CHECK" "$FW_SRC_DIR"
 else
     error "firmware checksum manifest not found: $FW_SRC_DIR/SHA256SUMS"
     exit 1
@@ -215,7 +218,7 @@ info "Copy source to: $DKMS_SRC_DIR"
 MUTATION_ACTIVE=1
 sudo rm -rf -- "$DKMS_SRC_DIR"
 sudo mkdir -p "$DKMS_SRC_DIR"
-sudo cp -a "$SOURCE_DIR/." "$DKMS_SRC_DIR/"
+aic_stage_driver_source "$SOURCE_DIR" "$DKMS_SRC_DIR" sudo
 sudo sed -i "s/^PACKAGE_VERSION=.*/PACKAGE_VERSION=\"$VERSION\"/" "$DKMS_SRC_DIR/dkms.conf"
 
 info "Reset DKMS state for this version"
@@ -272,7 +275,7 @@ info "Install firmware files"
 if [[ -d "$FW_SRC_DIR" ]]; then
     sudo install -d -m 0755 "$FW_DST_DIR"
     sudo cp -a "$FW_SRC_DIR/." "$FW_DST_DIR/"
-    (cd "$FW_DST_DIR" && sha256sum -c "$FW_SRC_DIR/SHA256SUMS")
+    "$FIRMWARE_CHECK" "$FW_DST_DIR" "$FW_SRC_DIR/SHA256SUMS"
 else
     warn "firmware source not found: $FW_SRC_DIR"
 fi

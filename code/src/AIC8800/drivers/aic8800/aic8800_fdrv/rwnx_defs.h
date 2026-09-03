@@ -642,9 +642,15 @@ struct sta_tx_flowctrl {
     u8 flowctrl;
 };
 
+#define RWNX_USERCONFIG_PROFILE_LEN 64
+
 struct rwnx_runtime_stats {
     u32 device_generation;
     u64 started_jiffies;
+    char userconfig_profile[RWNX_USERCONFIG_PROFILE_LEN];
+    atomic_t userconfig_load_failures;
+    atomic_t userconfig_parse_errors;
+    atomic_t userconfig_fallbacks;
     atomic_t conn_firmware_rejects;
     atomic_t cqm_rssi_low_events;
     atomic_t cqm_rssi_high_events;

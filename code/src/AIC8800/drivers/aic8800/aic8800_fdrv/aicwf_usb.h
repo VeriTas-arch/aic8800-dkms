@@ -194,6 +194,9 @@ int usb_msg_busrx_thread(void *data);
 #endif
 int usb_bustx_thread(void *data);
 int usb_busrx_thread(void *data);
+#ifdef CONFIG_TX_TASKLET
+void aicwf_tasklet_tx_process(unsigned long data);
+#endif
 
 
 extern void aicwf_hostif_ready(void);

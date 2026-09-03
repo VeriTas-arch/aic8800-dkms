@@ -28,10 +28,18 @@
 #endif
 
 #ifdef CONFIG_RX_TASKLET
-int aicwf_tasklet_rxframes(struct aicwf_rx_priv *rx_priv);
-#endif
-#ifdef CONFIG_TX_TASKLET
-void aicwf_tasklet_tx_process(struct aic_usb_dev *usb_dev);
+static int aicwf_tasklet_rxframes(struct aicwf_rx_priv *rx_priv);
+
+static void aicwf_rx_tasklet_handler(unsigned long data)
+{
+    struct aicwf_rx_priv *rx_priv = (struct aicwf_rx_priv *)data;
+    int ret;
+
+    ret = aicwf_tasklet_rxframes(rx_priv);
+    if (ret)
+        AICWFDBG_RATELIMITED(LOGERROR,
+                             "RX tasklet processing failed:%d\n", ret);
+}
 #endif
 
 
@@ -158,14 +166,14 @@ int aicwf_bus_init(uint bus_hdrlen, struct device *dev)
 #ifdef CONFIG_RX_TASKLET//AIDEN tasklet
 	AICWFDBG(LOGINFO, "%s use tasklet for rx \r\n", __func__);
 	tasklet_init(&((bus_if->bus_priv.usb)->recv_tasklet),
-		(void(*)(unsigned long))aicwf_tasklet_rxframes,
+		aicwf_rx_tasklet_handler,
 		(unsigned long)(bus_if->bus_priv.usb)->rx_priv);
 #endif
 
 #ifdef CONFIG_TX_TASKLET//AIDEN tasklet
 	AICWFDBG(LOGINFO, "%s use tasklet for tx \r\n", __func__);
 	tasklet_init(&((bus_if->bus_priv.usb)->xmit_tasklet),
-		(void(*)(unsigned long))aicwf_tasklet_tx_process,
+		aicwf_tasklet_tx_process,
 		(unsigned long)(bus_if->bus_priv.usb));
 #endif
 
@@ -397,7 +405,7 @@ void rwnx_frame_parser(char* tag, char* data, unsigned long len);
 #endif
 
 #ifdef CONFIG_RX_TASKLET
-int aicwf_tasklet_rxframes(struct aicwf_rx_priv *rx_priv)
+static int aicwf_tasklet_rxframes(struct aicwf_rx_priv *rx_priv)
 {
 
 		int ret = 0;

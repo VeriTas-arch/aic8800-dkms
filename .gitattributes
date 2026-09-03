@@ -1,0 +1,3 @@
+# Preserve the byte-exact layout of the imported upstream user configurations.
+code/src/AIC8800/fw/aic8800DC/aic_userconfig_8800dw.txt whitespace=-blank-at-eof
+code/src/AIC8800/fw/aic8800DC/aic_userconfig_8800dw_2357.txt whitespace=-blank-at-eof
