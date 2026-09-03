@@ -46,29 +46,8 @@ chmod +x code/scripts/build-test.sh
 ./code/scripts/build-test.sh 6.8.0-xx-generic
 ```
 
-启用内核额外编译器警告并把编译器警告视为失败（`W=1 WERROR=1`；历史
-kernel-doc 警告仍会单独输出）：
-
-```bash
-./code/scripts/build-test.sh --warnings 6.8.0-xx-generic
-```
-
-可用 `--config NAME=VALUE` 重复覆盖可选编译路径；安装了 `sparse` 时也可执行
-语义检查：
-
-```bash
-./code/scripts/build-test.sh --config CONFIG_USB_RX_AGGR=y 6.8.0-xx-generic
-./code/scripts/build-test.sh --sparse 6.8.0-xx-generic
-```
-
-仓库检查会验证脚本语法、版本一致性和空白错误，对所有
-`/lib/modules/*/build` 编译默认配置，并在最新 headers 上以严格警告模式构建
-默认配置及 USB 聚合、tasklet、预分配接收和共享消息端点等可选路径。已安装
-`shellcheck`/`sparse` 时会同时运行对应检查：
-
-```bash
-./code/scripts/check.sh
-```
+严格警告、可选 USB 配置、`sparse` 和完整编译矩阵等维护者命令见
+[AGENTS.md](AGENTS.md)。
 
 当前 Ubuntu/DKMS 主线只验证仓库默认的 USB 总线路径。源码中保留的 SDIO
 分支仍含上游遗留的 USB 专用结构依赖，不能作为受支持配置构建；本仓库的 USB
@@ -143,29 +122,10 @@ sudo dmesg -w | grep -Ei "aic|usb|firmware|rwnx"
 
 不建议使用 `unbind/bind` 强制切换 USB 接口，这可能导致 USB 栈异常。
 
-## 版本维护
+## 开发与维护
 
-统一版本文件为 `code/VERSION`。
-
-需要同步版本号时执行：
-
-```bash
-chmod +x code/scripts/sync-version.sh
-./code/scripts/sync-version.sh 1.0.9
-```
-
-该脚本会同步以下文件：
-
-- `code/VERSION`
-- `code/src/AIC8800/drivers/aic8800/dkms.conf`
-- `code/src/DEBIAN/control`
-- `code/src/AIC8800/drivers/aic8800/aic_dkms_version.h`
-
-只检查上述四处版本是否一致：
-
-```bash
-./code/scripts/sync-version.sh --check
-```
+严格编译矩阵、版本同步与降级规则、脚本测试以及 DKMS 自动重建回归流程已整理到
+[AGENTS.md](AGENTS.md)。README 仅保留安装、运行、诊断和恢复所需的操作说明。
 
 ## 运行期诊断
 
@@ -193,50 +153,6 @@ NetworkManager 和 wpa_supplicant 的时间线对照分析漫游原因。
 采集结果还包含启动 ID、源码提交与工作树状态、已加载模块和磁盘模块的
 `srcversion`/`vermagic`、USB 拓扑、接口统计、驱动计数以及 NetworkManager 日志，
 可用于区分驱动异常、USB 总线异常和上游网络问题。
-
-## DKMS 自动重建回归用例
-
-目标：在不切换当前运行内核的前提下，模拟系统升级后 DKMS 自动重建行为。
-
-1. 选择目标内核（非当前内核，且已安装 headers）
-
-   ```bash
-   uname -r
-   ls -1 /lib/modules | sort
-   ls -1 /usr/src | grep -E '^linux-headers-' | sort
-   ```
-
-2. 触发自动重建
-
-   ```bash
-   TARGET=6.8.0-90-generic
-   sudo dkms autoinstall -k "$TARGET"
-   dkms status | grep aic8800fdrv
-   ```
-
-3. 若提示同版本已存在，强制安装 DKMS 产物
-
-   ```bash
-   TARGET=6.8.0-90-generic
-   VER="$(cat code/VERSION)"
-   sudo dkms uninstall -m aic8800fdrv -v "$VER" -k "$TARGET" || true
-   sudo dkms install -m aic8800fdrv -v "$VER" -k "$TARGET" --force
-   ```
-
-4. 验证目标内核模块路径
-
-   ```bash
-   TARGET=6.8.0-90-generic
-   modinfo -k "$TARGET" aic8800_fdrv | grep '^filename'
-   modinfo -k "$TARGET" aic_load_fw | grep '^filename'
-   ```
-
-   期望输出路径包含 `/lib/modules/<target>/updates/dkms/`。
-
-5. 通过判定
-
-- `dkms status` 出现 `aic8800fdrv/<version>, <target-kernel>, x86_64: installed`
-- `modinfo -k <target-kernel>` 显示两个模块均来自 `updates/dkms`
 
 ## 清理回滚
 

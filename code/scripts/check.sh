@@ -29,6 +29,9 @@ else
     info "Skip shellcheck (not installed)"
 fi
 
+info "Test version synchronization workflow"
+bash "$SCRIPT_DIR/test-sync-version.sh"
+
 info "Check version metadata"
 "$SCRIPT_DIR/sync-version.sh" --check
 
