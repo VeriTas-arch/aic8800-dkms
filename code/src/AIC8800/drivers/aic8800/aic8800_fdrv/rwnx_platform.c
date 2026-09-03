@@ -275,6 +275,10 @@ static int rwnx_load_firmware(u32 **fw_buf, const char *name, struct device *dev
 	}
 	
 	buffer = vmalloc(size);
+	if (!buffer) {
+		release_firmware(fw);
+		return -ENOMEM;
+	}
 	memset(buffer, 0, size);
 	memcpy(buffer, dst, size);
 
@@ -292,9 +296,9 @@ static int rwnx_load_firmware(u32 **fw_buf, const char *name, struct device *dev
     void *buffer = NULL;
     char *path = NULL;
     struct file *fp = NULL;
-    int size = 0, len = 0, i = 0;
+    int size = 0, len = 0;
     ssize_t rdlen = 0;
-    u32 *src = NULL, *dst = NULL;
+    u32 *dst = NULL;
 	MD5_CTX md5;
 	unsigned char decrypt[16];
 
@@ -367,8 +371,10 @@ static int rwnx_load_firmware(u32 **fw_buf, const char *name, struct device *dev
         fp->f_pos += rdlen;
     }
 
-    /*start to transform the data format*/
-    src = (u32 *)buffer;
+    /*
+     * Preserve every byte. User configuration files are not necessarily a
+     * multiple of sizeof(u32), so a word-wise copy truncates their tail.
+     */
     dst = (u32 *)vmalloc(size);
 
     if (!dst) {
@@ -381,9 +387,7 @@ static int rwnx_load_firmware(u32 **fw_buf, const char *name, struct device *dev
         return -1;
     }
 
-    for (i = 0; i < (size/4); i++) {
-        dst[i] = src[i];
-    }
+    memcpy(dst, buffer, size);
 
     __putname(path);
     filp_close(fp, NULL);
